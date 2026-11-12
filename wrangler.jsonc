@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cyber-buddha",
+  "compatibility_date": "2026-11-10",
+
+  // 纯静态站点：Git 构建先执行 npm run build，wrangler 只负责上传 dist。
+  // SPA 回退由平台配置提供，不要再用 public/_redirects 写 `/* /index.html 200`，
+  // 该规则在 Workers assets 里会被判为无限循环（错误码 100324）。
+  "assets": {
+    "directory": "dist",
+    "not_found_handling": "single-page-application"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
