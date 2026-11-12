@@ -1,0 +1,18 @@
+{
+  "name": "赛博禅寺 · CYBER TEMPLE",
+  "short_name": "赛博禅寺",
+  "description": "敲木鱼就是出块：共修一炷香，代诵万佛愿。3D 赛博朋克寺庙实验原型。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05030f",
+  "theme_color": "#05030f",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

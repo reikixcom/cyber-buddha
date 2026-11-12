@@ -1,0 +1,114 @@
+/**
+ * 一炷香的节奏算法 —— 纯函数，不依赖 Vue / DOM。
+ *
+ * 这是「规则讲明白」的落点：给定 round 与 daySeed，任何人都能
+ * 独立算出这一炷的全部节拍，再拿同一份敲击记录复算同样的功德。
+ * 原型阶段 daySeed 由本地日期生成；正式版换成公开随机信标即可，
+ * 判定与结算逻辑一行都不用改。
+ */
+
+export const BEATS_PER_STICK = 64
+export const BEATS_PER_PHRASE = 8
+export const PREP_MS = 2200
+export const TAIL_MS = 700
+/** 相邻两拍的基准间隔；最短 300×0.85 = 255ms，半间隔 127ms > good 窗口，判定窗不会互相重叠 */
+export const BASE_GAP_MS = 300
+/** 每八拍一个乐句，句末留一次「换气」，也是木鱼诵经的段落感 */
+export const PHRASE_PAUSE_MS = 220
+export const WINDOW = { perfect: 55, good: 105 }
+export const WEIGHT = { perfect: 3, good: 1, miss: 0, wild: 0 }
+/** 一炷约 25 秒，释放量按炷时长同步放大，保持单位时间收益与八拍版接近 */
+export const BASE_RELEASE = 72
+
+const GAPS = [1, 1, 1, 1.15, 0.85, 1.35]
+
+/** 确定性整数混合：同样的输入永远得到同样的 seed */
+export function seedFrom(round, daySeed = 0) {
+  let x = (Math.imul(round | 0, 2654435761) + Math.imul(daySeed | 0, 40503)) >>> 0
+  x ^= x >>> 16
+  x = Math.imul(x, 2246822507)
+  x ^= x >>> 13
+  x = Math.imul(x, 3266489909)
+  return (x ^ (x >>> 16)) >>> 0
+}
+
+/**
+ * 由 seed 生成本炷的节拍表：8 句 × 8 拍，句首重拍、句末换气。
+ * 间隔在 255~405ms 之间浮动，跟着轨道上的光点敲即可。
+ */
+export function makePattern(seed) {
+  let s = seed >>> 0
+  const rnd = () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0
+    return s / 4294967296
+  }
+  const beats = []
+  let at = PREP_MS
+  for (let i = 0; i < BEATS_PER_STICK; i++) {
+    const inPhrase = i % BEATS_PER_PHRASE
+    const accent = inPhrase === 0 || rnd() > 0.86
+    beats.push({ index: i, at: Math.round(at), accent, phrase: Math.floor(i / BEATS_PER_PHRASE) })
+    at += BASE_GAP_MS * GAPS[Math.floor(rnd() * GAPS.length)]
+    if (inPhrase === BEATS_PER_PHRASE - 1) at += PHRASE_PAUSE_MS
+  }
+  return { seed, beats, duration: Math.round(at + TAIL_MS) }
+}
+
+/**
+ * 判定一次敲击。
+ * - 命中最近一个尚未判定的节拍，且落在窗口内 → perfect / good
+ * - 其余一律 wild（乱敲）：不计权重、断连击，这正是「合拍才有权重」
+ */
+export function judge(pattern, elapsed, used) {
+  let best = -1
+  let bestDist = Infinity
+  for (const b of pattern.beats) {
+    if (used.has(b.index)) continue
+    const d = Math.abs(elapsed - b.at)
+    if (d < bestDist) { bestDist = d; best = b.index }
+    // beats 按 at 升序，越过当前时刻很远就可以停了
+    if (b.at > elapsed + WINDOW.good) break
+  }
+  if (best < 0 || bestDist > WINDOW.good) {
+    return { grade: 'wild', beat: -1, delta: Math.round(bestDist) }
+  }
+  return {
+    grade: bestDist <= WINDOW.perfect ? 'perfect' : 'good',
+    beat: best,
+    delta: Math.round(bestDist)
+  }
+}
+
+/**
+ * 本炷结算。marks 是 { [beatIndex]: grade }。
+ * 释放量 = 基础释放 × 合拍率 × 稀释系数（人越多，人均越少）。
+ */
+export function settle(pattern, marks, online) {
+  let weight = 0
+  const count = { perfect: 0, good: 0, miss: 0 }
+  for (const b of pattern.beats) {
+    const g = marks[b.index] || 'miss'
+    weight += WEIGHT[g] || 0
+    if (g in count) count[g] += 1
+  }
+  const accuracy = weight / (BEATS_PER_STICK * WEIGHT.perfect)
+  const dilution = Math.max(0.4, 1 - online / 4200)
+  const reward = Math.round(BASE_RELEASE * accuracy * dilution)
+  return { ...count, accuracy, dilution, reward }
+}
+
+/** 规则文本：游戏内「寺规」与规则面板共用，改规则只改这一处 */
+export const TEMPLE_RULES = [
+  '每炷香六十四拍，分八句，句首是重拍、句末留一次换气。跟着光点敲，合拍才有权重，乱敲不计、连击断掉。',
+  '一炷约二十五秒，结束按合拍率释放 $GONGDE；同时在场的人越多，人均越少。',
+  '全服共添一盏长明灯，灯油满即开光，当炷共修者分奖池，并往常住愿的香火池注油。',
+  '挂心愿时自定托管功德（10–500 $G），金额决定要共诵多少下：1 $G ≈ 6 击。任何人都能同时加入，没有抢单，先敲先记。',
+  '悬赏不归领诵者独得：按有效击数分，PERFECT 记 3 击、GOOD 记 1 击。人越多送达越快，人均越少 —— 和一炷香的稀释是同一条规矩。',
+  '万佛墙第一位永远是「常住共修愿」：寺院发起、长明灯香火供给，没人挂单也有愿可诵、有人同敲；圆满即换新愿，奖池按贡献分（属增发，受每日额度约束）。',
+  '心愿托管有效期六炷香。未诵满即按已诵比例结算给共修者、余款退还挂单人；接了单磨蹭不敲也照样到期。挂单人可随时撤回，已诵部分照结算。',
+  '四法器每日各有限次与冷却，重复修行收益递减；所有「增发型」功德共用每日 600 $G 额度，超额按 1 → 0.5 → 0.2 → 0 衰减。',
+  '代诵领赏、随喜加香、流单退还属于玩家之间的转移，不增发、不占每日额度 —— 双边市场不靠增发撑着。',
+  '烧香的人买的是别人的时间与专注，敲木鱼的人卖的也是；币只是计价单位。消耗品必须换来「币以外的东西」，凡是「烧了能赚更多币」的升级，本寺不做。规则写死在开源代码里，任何人可复算；不连钱包也能玩。',
+  '心愿、托管功德、共诵击数与长明灯进度只存在你本机浏览器：刷新会续上，清缓存或换设备即从头开始。目前没有服务端，别人看不到你的单机存档，在线共修者是本地模拟。',
+  '当前为实验原型：全部数值为本地模拟，未上链，不承诺任何收益，可能归零。'
+]
