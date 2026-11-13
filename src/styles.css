@@ -461,6 +461,13 @@ button { font-family: inherit; cursor: pointer; }
   white-space: nowrap;
 }
 .toast small { display: block; text-align: center; font-size: 11px; letter-spacing: 0.3em; color: #fff2cf; opacity: 0.85; }
+/* 系统提示（分享、复制、校验结果）：要读得清，不能套功德飘字那套大金字 */
+.toast.system {
+  font-size: 13px; font-weight: 400; letter-spacing: 0.04em;
+  color: #d9f4ff; text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+  white-space: normal; max-width: min(360px, 70vw); word-break: break-all; line-height: 1.6;
+}
+.toast.system small { text-align: left; letter-spacing: 0.06em; color: #8aa6bb; }
 .toast-fly-enter-active { transition: all 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
 .toast-fly-leave-active { transition: all 0.65s ease; }
 .toast-fly-enter-from { opacity: 0; transform: translateY(18px) scale(0.7); }
@@ -933,6 +940,9 @@ button { font-family: inherit; cursor: pointer; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .live-strip.on .live-souls { color: #cfe9ff; }
+/* 限流退避：保留在线的青色，但点变琥珀，别让用户以为「没人」 */
+.live-strip.cool { color: var(--gold, #ffcc66); }
+.live-strip.cool .live-dot { background: var(--gold, #ffcc66); animation: none; box-shadow: 0 0 8px rgba(255, 204, 102, 0.6); }
 .wish-remote { font-size: 9px; color: #6e8ba3; font-family: var(--font-mono); }
 
 .wish-head { display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 8px; }
@@ -1137,6 +1147,11 @@ button { font-family: inherit; cursor: pointer; }
   .desktop-only { display: none; }
   .mobile-inline { display: inline; }
 
+  /* 飘字在窄屏别压住共修面板：贴顶栏下方，左对齐留出右侧卡片 */
+  .toast-stack { top: 92px; left: 12px; right: 12px; }
+  .toast { font-size: 17px; }
+  .toast.system { font-size: 12px; max-width: none; }
+
   /* 顶栏在窄屏压到一行，品牌名与功德卡片互不遮挡 */
   .hud { padding: 10px; }
   .hud-top { gap: 8px; }
@@ -1251,7 +1266,7 @@ button { font-family: inherit; cursor: pointer; }
   .bounty-need { margin-left: 0; font-size: 8px; }
   /* 共诵状态已在底部节奏条，避免面板底部再露半行被裁切 */
   .active-note { display: none; }
-  .toast-stack { left: 14px; top: 20%; }
+  .toast-stack { left: 12px; top: 92px; }
   .combo-badge { left: 14px; }
   .rules-card { padding: 16px; }
   .rules-list li { font-size: 11px; }

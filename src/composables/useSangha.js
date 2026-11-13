@@ -17,7 +17,10 @@ import {
 import { signMessage, verifyMessage } from '../temple/identity.js'
 
 export const SANGHA_KEY = 'cyber-temple-sangha-v1'
-const POLL_MS = 22000
+/** 轮询间隔：带抖动，避免所有人同一秒撞公告板 */
+const POLL_MS = 26000
+/** 每 N 次轮询做一次全中继对齐（否则发在别处中继的消息永远看不到） */
+const FULL_EVERY = 5
 const KEEP = 600
 
 function loadCache() {
@@ -49,9 +52,26 @@ export function useSangha({ id, probe, onEvent } = {}) {
   const reason = ref('')
   const busy = ref('')
   const known = ref(0)
-  /** 被限流后的退避窗口：公告板说了「太快」，就别继续每秒去撞门 */
+  /** 读被限流后的退避窗口：公告板说了「太快」，就别继续每秒去撞门 */
   const cooldownUntil = ref(0)
+  /**
+   * 写（心跳/挂愿/接单）单独一套退避。
+   * 读写不能共用一个窗口：读成功不代表写没被限流，共用会出现
+   * 「读到一条消息就把写的退避清掉 → 立刻又被 429」的来回撞门。
+   */
+  const postCoolUntil = ref(0)
   const cooling = ref(false)
+  /** 最近一次真正读通的中继，UI 上如实显示「谁在给你看消息」 */
+  const relay = ref('')
+  const polls = ref(0)
+  const mode = ref('fast')
+  let strikes = 0
+  let postStrikes = 0
+
+  function refreshCooling() {
+    const now = Date.now()
+    cooling.value = now < cooldownUntil.value || now < postCoolUntil.value
+  }
 
   let pollTimer = 0
   let beatTimer = 0
@@ -92,23 +112,38 @@ export function useSangha({ id, probe, onEvent } = {}) {
     if (!quiet && Date.now() < cooldownUntil.value) {
       return { ok: false, reason: '公告板限流中，稍后再试', added: 0 }
     }
-    const r = await pullRecords({ topic: SANGHA_TOPIC, since: opts.since || '2h' })
+    polls.value += 1
+    // 绝大多数轮询走单中继（省请求），每隔几次做一次全量对齐
+    const full = opts.full === true || polls.value % FULL_EVERY === 0
+    mode.value = full ? 'full' : 'fast'
+    const r = await pullRecords({
+      topic: SANGHA_TOPIC,
+      since: opts.since || (full ? '3h' : '20m'),
+      mode: mode.value
+    })
     if (!r.ok) {
-      const limited = (r.relays || []).some((x) => /429/.test(String(x.reason)))
+      strikes = Math.min(6, strikes + 1)
+      const limited = r.limited === true || (r.relays || []).some((x) => Number(x.status) === 429)
       if (limited) {
-        cooldownUntil.value = Date.now() + 45000
-        cooling.value = true
+        // 30s 起翻倍，最多 5 分钟；别把用户的浏览器当攻击器
+        const wait = Math.min(30000 * 2 ** (strikes - 1), 300000)
+        cooldownUntil.value = Date.now() + wait
       }
+      refreshCooling()
       status.value = 'offline'
-      statusText.value = limited ? '公告板限流，稍后自动重试' : (r.reason || '连不上公告板')
+      statusText.value = limited
+        ? `公告板限流，${Math.ceil((cooldownUntil.value - Date.now()) / 1000)} 秒后自动重试`
+        : (r.reason || '连不上公告板')
       reason.value = r.reason || ''
       return { ok: false, reason: r.reason, added: 0 }
     }
-    cooling.value = false
     cooldownUntil.value = 0
+    strikes = 0
+    refreshCooling()
     const added = absorb(r.messages)
     status.value = 'live'
-    statusText.value = '已接上公共公告板'
+    relay.value = String(r.host || '').split(' / ')[0] || ''
+    statusText.value = Date.now() < postCoolUntil.value ? '已接上公告板 · 心跳退避中' : '已接上公共公告板'
     reason.value = ''
     lastPull.value = Date.now()
     known.value = r.count || 0
@@ -121,10 +156,15 @@ export function useSangha({ id, probe, onEvent } = {}) {
     if (r.ok) {
       absorb([text])
       status.value = 'live'
-      cooling.value = false
+      postStrikes = 0
+      postCoolUntil.value = 0
+      refreshCooling()
     } else if (r.status === 429) {
-      cooldownUntil.value = Date.now() + Math.max(20000, (r.retryAfter || 0) * 1000)
-      cooling.value = true
+      // 写退避独立累加：读通了也不清它，否则会一直来回撞
+      postStrikes = Math.min(6, postStrikes + 1)
+      const wait = Math.max(20000, (r.retryAfter || 0) * 1000) * 2 ** Math.min(3, postStrikes - 1)
+      postCoolUntil.value = Date.now() + Math.min(wait, 300000)
+      refreshCooling()
     }
     return { ...r, kind }
   }
@@ -134,6 +174,13 @@ export function useSangha({ id, probe, onEvent } = {}) {
     const me = id?.identity
     if (!me || !me.priv) return { ok: false, reason: '还没有法号' }
     if (typeof document !== 'undefined' && document.hidden && !force) return { ok: false, reason: '页面在后台，暂不心跳' }
+    if (!force && Date.now() < postCoolUntil.value) {
+      const wait = Math.max(1, Math.ceil((postCoolUntil.value - Date.now()) / 1000))
+      reason.value = '心跳退避'
+      statusText.value = `心跳被限流，${wait} 秒后重发`
+      refreshCooling()
+      return { ok: false, reason: '心跳退避中' }
+    }
     if (!force && Date.now() < cooldownUntil.value) return { ok: false, reason: '公告板限流中，跳过这次心跳' }
     if (!force && Date.now() - lastBeat.value < HEARTBEAT_MS - 2000) return { ok: false, reason: '太频繁' }
 
@@ -202,16 +249,25 @@ export function useSangha({ id, probe, onEvent } = {}) {
   function start() {
     if (!stopped) return
     stopped = false
-    const tick = async () => {
+    // 用带抖动的递归定时器，而不是固定 setInterval：同一时刻涌入的用户越多，
+    // 越容易一起撞上公告板限流，抖动能把尖峰摊平
+    const loopPull = async () => {
+      if (stopped) return
       await pull({ quiet: true })
-      await beat()
+      if (stopped) return
+      pollTimer = setTimeout(loopPull, Math.round(POLL_MS * (0.85 + Math.random() * 0.3)))
     }
-    pollTimer = setInterval(() => { pull({ quiet: true }) }, POLL_MS)
-    beatTimer = setInterval(() => { beat() }, HEARTBEAT_MS)
+    const loopBeat = async () => {
+      if (stopped) return
+      await beat()
+      if (stopped) return
+      beatTimer = setTimeout(loopBeat, Math.round(HEARTBEAT_MS * (0.9 + Math.random() * 0.2)))
+    }
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisible)
     }
-    tick()
+    loopPull()
+    loopBeat()
   }
 
   function onVisible() {
@@ -220,8 +276,8 @@ export function useSangha({ id, probe, onEvent } = {}) {
 
   function stop() {
     stopped = true
-    clearInterval(pollTimer)
-    clearInterval(beatTimer)
+    clearTimeout(pollTimer)
+    clearTimeout(beatTimer)
     pollTimer = 0
     beatTimer = 0
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible)
@@ -235,11 +291,17 @@ export function useSangha({ id, probe, onEvent } = {}) {
     lastPull.value = 0
     lastBeat.value = 0
     beats.value = 0
+    cooldownUntil.value = 0
+    postCoolUntil.value = 0
+    strikes = 0
+    postStrikes = 0
+    refreshCooling()
   }
 
   return reactive({
     texts, items, agg, online, souls, wishes, reputation, selfPub,
     status, statusText, live, reason, lastPull, lastBeat, beats, busy, known, cooling,
+    relay, polls, mode,
     pull, beat, postWish, join, deliver, audit, start, stop, reset,
     soulName, shortPub
   })

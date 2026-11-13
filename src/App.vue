@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import StartScreen from './components/StartScreen.vue'
 import HudOverlay from './components/HudOverlay.vue'
+import ToastStack from './components/ToastStack.vue'
 import PracticeDeck from './components/PracticeDeck.vue'
 import SanghaPanel from './components/SanghaPanel.vue'
 import Joystick from './components/Joystick.vue'
@@ -104,10 +105,11 @@ function pushLog(text, hi = false) {
   if (logs.value.length > 6) logs.value.shift()
 }
 
-function addToast(text, sub = '') {
+function addToast(text, sub = '', kind = 'merit') {
   const id = ++seq
-  toasts.value.push({ id, text, sub })
-  setTimeout(() => { toasts.value = toasts.value.filter((t) => t.id !== id) }, 1700)
+  toasts.value.push({ id, text, sub, kind })
+  // 系统提示要读得完，功德飘字要够短促 —— 两种寿命不一样
+  setTimeout(() => { toasts.value = toasts.value.filter((t) => t.id !== id) }, kind === 'system' ? 3000 : 1700)
 }
 
 function save() {
@@ -331,6 +333,41 @@ function toggleQuality() {
 function select(id) { engine?.activate(id) }
 function resetView() { engine?.resetView() }
 function onJoy(v) { engine?.setJoystick(v.x, v.y) }
+
+/**
+ * 分享：手机上走系统分享面板，桌面上退回复制链接。
+ * 不做「邀请码 / 拉新奖励」—— 那是项目方的运营手段，这里没有项目方。
+ */
+async function shareTemple() {
+  const url = (typeof location !== 'undefined' ? location.origin : 'https://cyberbuddha.ai') + '/'
+  const text = `赛博禅寺 · 敲木鱼就是出块。共修一炷香，代诵万佛愿。`
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: '赛博禅寺 · CYBER TEMPLE', text, url })
+      return
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    addToast('链接已复制', '发给同修，一起共修一炷香', 'system')
+    return
+  } catch { /* 非安全上下文或没授权，落回手选复制 */ }
+  try {
+    const el = document.createElement('textarea')
+    el.value = url
+    el.setAttribute('readonly', '')
+    el.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
+    document.body.appendChild(el)
+    el.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(el)
+    if (ok) { addToast('链接已复制', '发给同修，一起共修一炷香', 'system'); return }
+  } catch { /* 还是不行就明说 */ }
+  addToast('请手动复制链接', url, 'system')
+}
+
 function resetAll() {
   merit.value = 0
   bestCombo.value = 0
@@ -467,7 +504,6 @@ onBeforeUnmount(() => {
       :logs="logs"
       :hovered="hovered"
       :active-id="activeId"
-      :toasts="toasts"
       :muted="muted"
       :quality="quality"
       :lamp-pct="practice.lampPct"
@@ -477,6 +513,7 @@ onBeforeUnmount(() => {
       @toggle-quality="toggleQuality"
       @select="select"
       @reset-view="resetView"
+      @share="shareTemple"
     />
 
     <PracticeDeck
@@ -496,8 +533,12 @@ onBeforeUnmount(() => {
       :online="sangha.online"
       :live="sangha.status === 'live'"
       @enter="enter"
+      @share="shareTemple"
       @reset="resetAll"
     />
+
+    <!-- 提示层独立于 HUD：首屏点「分享」也要有反馈 -->
+    <ToastStack :toasts="toasts" />
 
     <Transition name="fade">
       <div v-if="booting" class="boot">

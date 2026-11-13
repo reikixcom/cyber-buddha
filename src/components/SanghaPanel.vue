@@ -46,12 +46,28 @@ const draftNeed = computed(() => props.p.needFor(clampBounty(props.p.wishBounty)
 /** 共修网络的真实状态：连上了才有「同修」，连不上就只有你自己 */
 const live = computed(() => !!props.s?.live)
 const soulList = computed(() => (props.s?.souls || []).slice(0, 6))
+const cooling = computed(() => !!props.s?.cooling)
 const boardStat = computed(() => {
+  // 已连上时照常报人数与真愿数，限流只用琥珀色小点和悬停提示表达 ——
+  // 不能让「心跳退避」把「寺里有几个人」这件事盖掉
   if (!live.value) return props.s?.statusText || '离线演示'
   const real = (props.p.wishes || []).filter((w) => (w.remote || w.mine) && !w.done).length
   return narrow.value
     ? `${real} 条真愿 · ${props.p.online} 人在场`
     : `公告板 ${real} 条真愿 · 在线 ${props.p.online} 人`
+})
+/** 悬停能看清「谁在供消息」：中继名、轮询模式与次数，出问题时好排查 */
+const stripHint = computed(() => {
+  const s = props.s
+  if (!s) return ''
+  const bits = []
+  bits.push(`中继：${s.relay || '未接上'}`)
+  bits.push(`模式：${s.mode === 'full' ? '全量对齐' : '单点轮询'}`)
+  bits.push(`已轮询 ${s.polls || 0} 次`)
+  if (s.lastPull) bits.push(`上次同步 ${Math.max(0, Math.round((Date.now() - s.lastPull) / 1000))} 秒前`)
+  if (s.cooling && s.statusText) bits.push(s.statusText)
+  else if (s.reason) bits.push(`原因：${s.reason}`)
+  return bits.join(' · ')
 })
 /** 窄屏只留两个名字，多了会跟状态文字抢位置 */
 const soulsLine = computed(() => {
@@ -96,7 +112,7 @@ function wishState(w) {
     </div>
 
     <div class="sangha-body">
-      <div class="live-strip" :class="{ on: live }">
+      <div class="live-strip" :class="{ on: live, cool: cooling }" :title="stripHint">
         <span class="live-dot"></span>
         <span class="live-text">{{ boardStat }}</span>
         <span class="live-souls">{{ soulsLine }}</span>

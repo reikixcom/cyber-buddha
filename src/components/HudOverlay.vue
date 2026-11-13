@@ -13,7 +13,6 @@ const props = defineProps({
   logs: { type: Array, required: true },
   hovered: { type: Object, default: null },
   activeId: { type: String, default: '' },
-  toasts: { type: Array, required: true },
   muted: { type: Boolean, default: false },
   quality: { type: String, default: 'high' },
   lampPct: { type: Number, default: 0 },
@@ -67,6 +66,7 @@ const ACTIONS = [
             {{ quality === 'high' ? '◈' : '◇' }}
           </button>
           <button class="icon-btn clickable" title="复位视角 (R)" @click="emit('reset-view')">⟲</button>
+          <button class="icon-btn clickable" title="分享给同修" @click="emit('share')">↗</button>
         </div>
 
         <div class="merit-card panel">
@@ -124,14 +124,7 @@ const ACTIONS = [
       </div>
     </Transition>
 
-    <!-- 功德飘字 -->
-    <div class="toast-stack">
-      <TransitionGroup name="toast-fly">
-        <div v-for="t in toasts" :key="t.id" class="toast">
-          {{ t.text }}<small v-if="t.sub">{{ t.sub }}</small>
-        </div>
-      </TransitionGroup>
-    </div>
+    <!-- 功德飘字已提到 App 层（ToastStack）：首屏未入寺时也要能出提示 -->
     <div v-if="combo >= 3" :key="combo" class="combo-badge">COMBO × {{ combo }}</div>
 
     <!-- 底部 -->

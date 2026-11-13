@@ -5,7 +5,7 @@ defineProps({
   online: { type: Number, default: 0 },
   live: { type: Boolean, default: false }
 })
-const emit = defineEmits(['enter', 'reset'])
+const emit = defineEmits(['enter', 'reset', 'share'])
 </script>
 
 <template>
@@ -61,6 +61,7 @@ const emit = defineEmits(['enter', 'reset'])
           <div class="start-foot-note">无账号、无服务器、无钱包 · 规则全在这份开源前端里，谁都能复核</div>
           <div class="start-foot-stats">
             <template v-if="merit > 0">你的功德 {{ merit }} $G · 最高连击 {{ bestCombo }} · </template>
+            <button class="start-reset clickable" @click="emit('share')">分享给同修</button>
             <button class="start-reset clickable" @click="emit('reset')">清空本机账本</button>
           </div>
         </div>
