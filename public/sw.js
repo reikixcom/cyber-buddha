@@ -12,7 +12,7 @@
  *  - 只缓存同源 GET，跨域请求一律交给浏览器默认处理
  */
 /** 公开信标是跨域请求，不进离线缓存；断网时前端会明确降级为本机种子 */
-const CACHE = 'cyber-temple-v6'
+const CACHE = 'cyber-temple-v7'
 const SHELL = [
   '/', '/index.html', '/manifest.webmanifest',
   '/icon.svg', '/icon-192.png', '/icon-512.png'

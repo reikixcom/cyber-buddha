@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { emitFactor } from '../temple/economy.js'
+import { fmtCountdown, fmtClock } from '../temple/dharma.js'
 
 const props = defineProps({
   merit: { type: Number, required: true },
@@ -17,12 +18,24 @@ const props = defineProps({
   quality: { type: String, default: 'high' },
   lampPct: { type: Number, default: 0 },
   openings: { type: Number, default: 0 },
-  templePool: { type: Number, default: 0 }
+  templePool: { type: Number, default: 0 },
+  streak: { type: Object, default: () => ({ days: 0, best: 0 }) },
+  assembly: { type: Object, default: () => ({ active: false, mult: 1, msLeft: 0, nextAt: 0 }) }
 })
 const emit = defineEmits(['toggle-mute', 'toggle-quality', 'select', 'reset-view'])
 
 const emitNow = computed(() => emitFactor(props.daily.earned))
 const dailyPct = computed(() => Math.min(100, (props.daily.earned / props.dailyCap) * 100))
+
+/** 窄屏只有 122px 宽，这里只能放得下「晨课 ×2 07:12」这种六七个字的短句 */
+const asmShort = computed(() => {
+  const a = props.assembly
+  if (!a) return ''
+  if (a.active) return `${a.label} ×${a.mult} ${fmtCountdown(a.msLeft)}`
+  const soon = a.msToNext > 0 && a.msToNext < 10 * 60 * 1000
+  return `${soon ? '将开' : '法会'} ${fmtClock(a.nextAt)}`
+})
+const streakHot = computed(() => (props.streak?.days || 0) >= 3)
 
 /** 开光瞬间给长明灯一次明确的视觉反馈，否则「灯油满了」毫无存在感 */
 const lampFlash = ref(false)
@@ -69,7 +82,7 @@ const ACTIONS = [
           <button class="icon-btn clickable" title="分享给同修" @click="emit('share')">↗</button>
         </div>
 
-        <div class="merit-card panel">
+        <div class="merit-card panel" :class="{ 'is-assembly': assembly.active }">
           <div class="panel-title">$GONGDE · 功德余额</div>
           <div class="merit-value">{{ merit.toLocaleString() }}<span class="merit-unit">$G</span></div>
           <div class="merit-rank">当前果位 · {{ rank }}</div>
@@ -79,6 +92,16 @@ const ACTIONS = [
             <b v-if="emitNow < 1">· 增发 ×{{ emitNow }}</b>
           </div>
           <div class="daily-bar"><i :style="{ width: dailyPct + '%' }"></i></div>
+          <!-- 连修与法会是「明天还来」的两个理由，压成一行放在额度下面 -->
+          <div class="merit-day">
+            <span class="day-streak" :class="{ hot: streakHot }" :title="`连修 ${streak.days} 日 · 最佳 ${streak.best} 日`">
+              <template v-if="streak.days > 0">连修 {{ streak.days }} 日</template>
+              <template v-else>未起修</template>
+            </span>
+            <span class="day-asm" :class="{ on: assembly.active }" :title="assembly.active ? '法会进行中，修行功德翻倍' : '下一场法会的开始时间'">
+              {{ asmShort }}
+            </span>
+          </div>
         </div>
 
         <div class="lamp-card panel" :class="{ 'is-flaring': lampFlash }">

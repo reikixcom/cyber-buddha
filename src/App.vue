@@ -19,6 +19,10 @@ import { snapshotPractice, STORE_KEY } from './temple/save.js'
 import {
   utcDayKey, loadCachedBeacon, fetchDayBeacon, cacheBeacon
 } from './temple/beacon.js'
+import {
+  assemblyAt, fmtCountdown, normalizeStreak,
+  streakUpdate, streakMark, freshStreak, verseOfDay, DAILY_VERSES
+} from './temple/dharma.js'
 
 const RANKS = [
   { min: 0, name: '初入山门' },
@@ -35,14 +39,7 @@ const QUEST_DEFS = [
   { id: 'fish', label: '敲一记电子木鱼' },
   { id: 'bell', label: '撞响赛博晨钟' }
 ]
-const VERSES = [
-  '色即是空，空即是数据',
-  '木鱼一响，BUG 消亡',
-  '服务器即道场，日志即经文',
-  '万物皆可上链，唯因果不可篡改',
-  '香火不问出处，功德只认真心',
-  '一念三千线程，弹指八万 Bug'
-]
+const VERSES = DAILY_VERSES
 
 const canvasRef = ref(null)
 const started = ref(false)
@@ -59,6 +56,12 @@ const quality = ref('high')
 const taskDone = ref({ incense: false, bow: false, fish: false, bell: false })
 /** 当日增发额度、各法器次数与冷却；跨天自动重置 */
 const daily = ref(freshDaily())
+/** 连修：昨天来过就 +1，断一天归零；只做身份，不额外发功德 */
+const streak = ref(freshStreak())
+/** 每秒走一格，法会倒计时与「是否在场内」都由它驱动 */
+const nowTick = ref(Date.now())
+const asm = computed(() => assemblyAt(nowTick.value))
+const verse = computed(() => verseOfDay(dayKey()))
 const toasts = ref([])
 const logs = ref([])
 const hovered = ref(null)
@@ -73,6 +76,8 @@ let getPracticeSnapshot = () => null
 let pendingPracticeSave = null
 let autoSaveTimer = 0
 let dayTimer = 0
+/** 法会倒计时的秒表；只推 nowTick，不直接改业务状态 */
+let tickTimer = 0
 /** 信标按 UTC 换日，与本地日的额度重置各自独立判断 */
 let beaconDay = utcDayKey()
 let beaconBusy = false
@@ -124,6 +129,7 @@ function save() {
       knockCount: knockCount.value,
       taskDone: taskDone.value,
       daily: daily.value,
+      streak: streak.value,
       muted: muted.value,
       quality: quality.value,
       // 心愿与托管是真实扣过款的资产，必须和余额一起落盘
@@ -143,6 +149,7 @@ function load() {
     knockCount.value = Number(d.knockCount) || 0
     taskDone.value = { ...taskDone.value, ...(d.taskDone || {}) }
     daily.value = normalizeDaily(d.daily)
+    streak.value = normalizeStreak(d.streak)
     muted.value = !!d.muted
     quality.value = d.quality === 'low' ? 'low' : 'high'
     pendingPracticeSave = d.practice ?? null
@@ -155,7 +162,9 @@ function load() {
  * kind='transfer' 转移型：悬赏托管、代诵领赏、随喜、退还，玩家之间转手，不占额度
  */
 function addBalance(n, kind = 'transfer') {
-  const credited = n > 0 && kind === 'emit' ? emitCredit(daily.value.earned, n) : n
+  // 法会加成只作用在增发型上：转移型是玩家之间转手，翻倍等于凭空印钱
+  const boosted = n > 0 && kind === 'emit' ? Math.round(n * asm.value.mult) : n
+  const credited = n > 0 && kind === 'emit' ? emitCredit(daily.value.earned, boosted) : boosted
   if (n > 0 && kind === 'emit') daily.value.earned += credited
   merit.value = Math.max(0, merit.value + credited)
   save()
@@ -265,6 +274,46 @@ function notifyBlock(type, check) {
   lastNotify[type] = Date.now()
 }
 
+/**
+ * 推进连修。只在「进寺」和「挂机跨午夜」两处调用，同一天重复调用不会叠加。
+ * 里程碑只发一句祝词，不发功德 —— 这套账里没有人有权凭空印发。
+ */
+function touchStreak(today = dayKey()) {
+  const next = streakUpdate(streak.value, today)
+  streak.value = next
+  if (!next.changed) return next
+  const mark = streakMark(next.days)
+  if (mark) {
+    pushLog(`连修 ${next.days} 日 · 未曾中断`, true)
+    addToast(`连修 ${next.days} 日`, '明天再来，别断了')
+  } else {
+    pushLog(`连修第 ${next.days} 日`)
+  }
+  save()
+  return next
+}
+
+/** 法会开场是全站同时发生的，值得一次明确的到场提示；散场不打扰 */
+watch(() => asm.value.active, (on) => {
+  if (!on) return
+  const a = asm.value
+  pushLog(`法会开场 · ${a.label} · 十二分钟内修行功德 ×${a.mult}`, true)
+  addToast(`法会开场 · ${a.label}`, `修行功德 ×${a.mult} · 剩 ${fmtCountdown(a.msLeft)}`)
+  if (started.value) engine?.celebrate()
+})
+
+/**
+ * 果位晋升要有仪式感：数字一直在涨，但「我换了一层」这件事
+ * 只在这一个瞬间能被感知。升了就报一次，不重复。
+ */
+watch(rankIdx, (now, before) => {
+  if (now <= before) return
+  const name = RANKS[now].name
+  pushLog(`果位晋升 · ${name}（累计 ${merit.value} $G）`, true)
+  addToast(`晋升 · ${name}`, `累计功德 ${merit.value} $G`)
+  if (started.value) engine?.celebrate()
+})
+
 function onMerit(amount, type) {
   const check = ritualCheck(type, daily.value)
   if (!check.ok) {
@@ -273,15 +322,19 @@ function onMerit(amount, type) {
     return
   }
 
-  applyRitual(daily.value, type, check.amount)
-  addBalance(check.amount)
+  // 四法器的递减与额度衰减已在 ritualCheck 里算完，这里只叠加法会倍数：
+  // 再走一次 emitCredit 会二次衰减，法会就等于白开
+  const gain = Math.max(1, Math.round(check.amount * asm.value.mult))
+  applyRitual(daily.value, type, gain)
+  addBalance(gain)
   if (QUEST_DEFS.some((q) => q.id === type)) {
     taskDone.value = { ...taskDone.value, [type]: true }
   }
   const names = { incense: '香火', bow: '叩拜', fish: '木鱼', bell: '晨钟' }
-  const note = check.factor < 1 ? ` · 今日增发 ×${check.factor}`
-    : check.amount < RITUALS[type].base ? ' · 重复修行递减' : ''
-  addToast(`功德 +${check.amount}`, `${names[type] || '修行'} · 今日 ${daily.value.earned}/${DAILY_CAP}${note}`)
+  const note = asm.value.mult > 1 ? ` · 法会 ×${asm.value.mult}`
+    : check.factor < 1 ? ` · 今日增发 ×${check.factor}`
+      : check.amount < RITUALS[type].base ? ' · 重复修行递减' : ''
+  addToast(`功德 +${gain}`, `${names[type] || '修行'} · 今日 ${daily.value.earned}/${DAILY_CAP}${note}`)
 
   if (type === 'fish') {
     const now = Date.now()
@@ -290,9 +343,9 @@ function onMerit(amount, type) {
     bestCombo.value = Math.max(bestCombo.value, combo.value)
     knockCount.value += 1
     if (knockCount.value % 12 === 0) {
-      const verse = VERSES[Math.floor(Math.random() * VERSES.length)]
-      pushLog('偶得偈语：' + verse, true)
-      addToast('禅意顿悟', verse)
+      const line = VERSES[Math.floor(Math.random() * VERSES.length)]
+      pushLog('偶得偈语：' + line, true)
+      addToast('禅意顿悟', line)
     }
   }
   save()
@@ -360,6 +413,7 @@ function resetAll() {
   combo.value = 0
   taskDone.value = { incense: false, bow: false, fish: false, bell: false }
   daily.value = freshDaily()
+  streak.value = streakUpdate(freshStreak(), dayKey())
   practice.resetMarket()
   ledger.reset()
   save()
@@ -403,6 +457,7 @@ function checkNewDay() {
     taskDone.value = { incense: false, bow: false, fish: false, bell: false }
     pushLog('新的一日 · 香火额度与四法器次数已重置', true)
     addToast('新的一日', `每日 ${DAILY_CAP} $G 额度已重置`)
+    touchStreak()
     save()
   }
   // UTC 零点是全球换功课的时刻，和本地时区的额度重置不是同一条线
@@ -416,6 +471,7 @@ onMounted(() => {
   if (practice.restoreMarket(pendingPracticeSave)) {
     pushLog('本机存档已续上 · 心愿与香火进度仍在', true)
   }
+  touchStreak()
   const cached = loadCachedBeacon()
   if (cached) {
     practice.applyBeacon(cached)
@@ -433,6 +489,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisibility)
   autoSaveTimer = setInterval(() => { if (started.value) save() }, 4000)
   dayTimer = setInterval(checkNewDay, 15000)
+  tickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
   try {
     engine = new TempleEngine(canvasRef.value, {
       onReady: () => {
@@ -460,6 +517,7 @@ onBeforeUnmount(() => {
   clearTimeout(activeTimer)
   clearInterval(autoSaveTimer)
   clearInterval(dayTimer)
+  clearInterval(tickTimer)
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('pagehide', onPageHide)
   document.removeEventListener('visibilitychange', onVisibility)
@@ -494,6 +552,8 @@ onBeforeUnmount(() => {
       :lamp-pct="practice.lampPct"
       :openings="practice.openings"
       :temple-pool="practice.templePool"
+      :streak="streak"
+      :assembly="asm"
       @toggle-mute="toggleMute"
       @toggle-quality="toggleQuality"
       @select="select"
@@ -517,6 +577,9 @@ onBeforeUnmount(() => {
       :best-combo="bestCombo"
       :online="sangha.online"
       :live="sangha.status === 'live'"
+      :streak="streak"
+      :assembly="asm"
+      :verse="verse"
       @enter="enter"
       @share="shareTemple"
       @reset="resetAll"
@@ -535,6 +598,7 @@ onBeforeUnmount(() => {
       :seals="practice.seals"
       :identity="ledger.identity"
       :online="sangha.online"
+      :streak-days="streak.days"
       @close="shareOpen = false"
     />
 

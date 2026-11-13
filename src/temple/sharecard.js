@@ -35,7 +35,7 @@ function grade(acc) {
  * 一张的结论（round/accuracy/short/beaconRound）算好了，直接用。
  * 所有字段都做上限保护：这张卡会被发出去，不能因为一个 NaN 就画出「NaN $G」。
  */
-export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealCount = 0, lastSeal = null, identity = null, online = 0 } = {}) {
+export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealCount = 0, lastSeal = null, identity = null, online = 0, streakDays = 0 } = {}) {
   const last = lastSeal && typeof lastSeal === 'object' ? lastSeal : null
   const num = (v, cap = 1e9) => {
     const n = Number(v)
@@ -56,6 +56,7 @@ export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealC
     source: last ? (Number(last?.beaconRound) > 0 ? '公开信标' : '本机弱验证') : '',
     grade: grade(num(last?.accuracy)),
     online: Math.round(num(online, 1e6)),
+    streak: Math.round(num(streakDays, 1e5)),
     hasSeal: !!last
   }
 }
@@ -176,13 +177,14 @@ export function drawShareCard(ctx, d, opts = {}) {
   ctx.fillText('累计功德', pad, y + 46)
   y += 140
 
-  // 三个小指标
+  // 四个小指标：连修放在最后一列，它是「我还在」的证据，不是成绩
   const stats = [
     ['最高连击', `×${d.bestCombo}`],
     ['总敲击', `${d.knocks}`],
-    ['禅印', `${d.sealCount} 张`]
+    ['禅印', `${d.sealCount} 张`],
+    ['连修', `${d.streak} 日`]
   ]
-  const colW = (W - pad * 2) / 3
+  const colW = (W - pad * 2) / stats.length
   for (let i = 0; i < stats.length; i++) {
     const x = pad + colW * i
     ctx.fillStyle = '#6e8ba3'

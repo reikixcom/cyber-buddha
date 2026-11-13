@@ -223,6 +223,23 @@ button { font-family: inherit; cursor: pointer; }
   letter-spacing: 0.06em; color: #7fa6b8;
 }
 .merit-daily b { color: var(--magenta); font-weight: 500; }
+
+/* 连修 + 法会：一行两段，别把右上角的卡片撑高 —— 桌面端一行够用，窄屏再压字号 */
+.merit-day {
+  margin-top: 5px;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.04em;
+  color: #6e8ba3; white-space: nowrap;
+}
+.day-streak { color: #6e8ba3; }
+.day-streak.hot { color: var(--gold); }
+.day-asm { color: #5b7386; }
+.day-asm.on { color: var(--gold); text-shadow: 0 0 9px rgba(255, 204, 102, 0.6); }
+/* 法会进行中，整张功德卡换成金边：一进寺就知道「现在敲是双倍」 */
+.merit-card.is-assembly {
+  border-color: rgba(255, 204, 102, 0.6);
+  box-shadow: 0 0 26px rgba(255, 190, 80, 0.2), inset 0 0 20px rgba(255, 190, 80, 0.06);
+}
 .daily-bar { margin-top: 4px; height: 2px; background: rgba(255, 45, 149, 0.14); overflow: hidden; }
 .daily-bar i { display: block; height: 100%; background: var(--magenta); box-shadow: 0 0 8px var(--magenta); transition: width 0.5s ease; }
 .q-count { margin-left: 4px; font-style: normal; font-family: var(--font-mono); font-size: 9px; color: #6e8ba3; }
@@ -580,6 +597,22 @@ button { font-family: inherit; cursor: pointer; }
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: #7d94a6;
 }
 .start-live.on { color: #9ef2e6; border-color: rgba(0, 240, 255, 0.35); }
+
+/* 今日：法会几点开 + 今天这一偈。首屏唯一每天都变的两行字 */
+.start-today {
+  margin: 14px auto 0; display: flex; flex-direction: column; align-items: center; gap: 7px;
+}
+.today-asm {
+  padding: 5px 13px; border-radius: 999px;
+  border: 1px dashed rgba(255, 204, 102, 0.24);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: #8399ab;
+}
+.today-asm.on {
+  border-style: solid; border-color: rgba(255, 204, 102, 0.72);
+  color: #ffe2a6; background: rgba(255, 204, 102, 0.08);
+  box-shadow: 0 0 24px rgba(255, 190, 80, 0.22);
+}
+.today-verse { font-size: 12px; letter-spacing: 0.18em; color: #5f7d92; }
 .start-foot-stats { margin-top: 7px; color: #3d5262; }
 .start-reset {
   margin-left: 10px; padding: 0; border: 0; background: none; cursor: pointer;
@@ -592,6 +625,31 @@ button { font-family: inherit; cursor: pointer; }
   .start-steps { grid-template-columns: 1fr; gap: 9px; }
   .start-lede { font-size: 14px; }
   .start-step p { font-size: 11px; }
+  .start-today { margin-top: 12px; gap: 6px; }
+  .today-asm { font-size: 9px; padding: 4px 10px; }
+  .today-verse { font-size: 11px; letter-spacing: 0.12em; }
+}
+
+/*
+ * 矮屏（老款手机、折叠屏外屏、横屏）：「进入山门」必须留在第一屏。
+ * 内容一句都不删，只把标题、卡片与间距压紧 —— 首屏还要靠滚动才能开始，
+ * 那就等于把一半人挡在门外。
+ */
+@media (max-height: 800px), (max-width: 720px) and (max-height: 900px) {
+  .start-screen { padding: 12px 0; }
+  .start-title { margin: 10px 0 2px; font-size: clamp(38px, 11vw, 66px); }
+  .start-lede { margin-top: 10px; font-size: 13px; line-height: 1.7; }
+  .start-steps { margin-top: 14px; gap: 7px; }
+  .start-step { padding: 8px 11px 9px; }
+  .start-step b { font-size: 9px; }
+  .start-step h3 { margin: 3px 0; font-size: 12px; }
+  .start-step p { font-size: 10px; line-height: 1.55; }
+  .start-live { margin-top: 11px; padding: 5px 11px; font-size: 9px; }
+  .start-today { margin-top: 9px; gap: 5px; }
+  .start-actions { margin-top: 16px; }
+  .btn-main { min-width: 190px; padding: 12px 26px; font-size: 14px; }
+  .start-guide { margin-top: 16px; gap: 14px; }
+  .start-foot { margin-top: 14px; }
 }
 
 .start-actions { margin-top: 34px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
@@ -1168,6 +1226,7 @@ button { font-family: inherit; cursor: pointer; }
   .merit-rank { margin-top: 3px; font-size: 8px; letter-spacing: 0.04em; white-space: nowrap; }
   .merit-bar { margin-top: 5px; }
   .merit-daily { margin-top: 3px; font-size: 7px; letter-spacing: 0; white-space: nowrap; }
+  .merit-day { margin-top: 3px; font-size: 7px; letter-spacing: 0; gap: 4px; }
   .daily-bar { margin-top: 3px; }
   .icon-btn { width: 26px; height: 26px; font-size: 12px; }
 

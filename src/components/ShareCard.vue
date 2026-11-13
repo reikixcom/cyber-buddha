@@ -16,7 +16,8 @@ const props = defineProps({
   lastSeal: { type: Object, default: null },
   seals: { type: Array, default: () => [] },
   identity: { type: Object, default: null },
-  online: { type: Number, default: 0 }
+  online: { type: Number, default: 0 },
+  streakDays: { type: Number, default: 0 }
 })
 const emit = defineEmits(['close'])
 
@@ -43,7 +44,8 @@ const data = computed(() => buildShareData({
   sealCount: Math.max(props.sealCount || 0, props.seals.length),
   lastSeal: last.value,
   identity: props.identity,
-  online: props.online
+  online: props.online,
+  streakDays: props.streakDays
 }))
 
 function paint() {

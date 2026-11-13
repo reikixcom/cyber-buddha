@@ -1,9 +1,14 @@
 <script setup>
+import { assemblyText } from '../temple/dharma.js'
+
 defineProps({
   merit: { type: Number, default: 0 },
   bestCombo: { type: Number, default: 0 },
   online: { type: Number, default: 0 },
-  live: { type: Boolean, default: false }
+  live: { type: Boolean, default: false },
+  streak: { type: Object, default: () => ({ days: 0, best: 0 }) },
+  assembly: { type: Object, default: () => ({ active: false }) },
+  verse: { type: String, default: '' }
 })
 const emit = defineEmits(['enter', 'reset', 'share'])
 </script>
@@ -46,6 +51,12 @@ const emit = defineEmits(['enter', 'reset', 'share'])
             : '正在接上公共公告板 · 连不上也能独修' }}
         </div>
 
+        <!-- 每天变的两行字：法会几点开、今天这一偈。老玩家一眼就知道要不要留下 -->
+        <div class="start-today">
+          <span class="today-asm" :class="{ on: assembly.active }">{{ assemblyText(assembly) }}</span>
+          <span class="today-verse">今日一偈 · {{ verse }}</span>
+        </div>
+
         <div class="start-actions">
           <button class="btn-main" @click="emit('enter')">进 入 山 门</button>
         </div>
@@ -60,7 +71,9 @@ const emit = defineEmits(['enter', 'reset', 'share'])
         <div class="start-foot">
           <div class="start-foot-note">无账号、无服务器、无钱包 · 规则全在这份开源前端里，谁都能复核</div>
           <div class="start-foot-stats">
-            <template v-if="merit > 0">你的功德 {{ merit }} $G · 最高连击 {{ bestCombo }} · </template>
+            <template v-if="merit > 0">
+              你的功德 {{ merit }} $G · 最高连击 {{ bestCombo }}<template v-if="streak.days > 1"> · 连修 {{ streak.days }} 日</template> ·
+            </template>
             <button class="start-reset clickable" @click="emit('share')">分享给同修</button>
             <button class="start-reset clickable" @click="emit('reset')">清空本机账本</button>
           </div>

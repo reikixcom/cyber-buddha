@@ -67,3 +67,11 @@ test('长法号会被压缩，不会撑破标题行', () => {
   const d = buildShareData({ identity: { name: long } })
   assert.equal(d.name, long, '取数层不做截断，交给绘制层按宽度裁剪')
 })
+
+test('连修天数进卡：没有就写 0 日，脏数据不会变成 NaN', () => {
+  assert.equal(buildShareData({}).streak, 0)
+  assert.equal(buildShareData({ streakDays: 12 }).streak, 12)
+  assert.equal(buildShareData({ streakDays: -3 }).streak, 0)
+  assert.equal(buildShareData({ streakDays: 'x' }).streak, 0)
+  assert.equal(buildShareData({ streakDays: 1e9 }).streak, 1e5)
+})
