@@ -11,7 +11,8 @@
  *  - 页面、manifest、图标 → network-first，失败回落缓存；离线时用缓存的 index.html
  *  - 只缓存同源 GET，跨域请求一律交给浏览器默认处理
  */
-const CACHE = 'cyber-temple-v2'
+/** 公开信标是跨域请求，不进离线缓存；断网时前端会明确降级为本机种子 */
+const CACHE = 'cyber-temple-v3'
 const SHELL = [
   '/', '/index.html', '/manifest.webmanifest',
   '/icon.svg', '/icon-192.png', '/icon-512.png'

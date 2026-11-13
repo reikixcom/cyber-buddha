@@ -1294,6 +1294,7 @@ button { font-family: inherit; cursor: pointer; }
   gap: 5px 14px; margin-top: 9px; font-size: 10px; color: #9dc4d6;
 }
 .seal-detail b { color: #eafcff; font-family: var(--font-mono); font-weight: 400; }
+.seal-detail .beacon-sources { grid-column: 1 / -1; word-break: break-word; }
 .seal-note {
   margin-top: 14px; padding-top: 10px; border-top: 1px dashed rgba(0, 240, 255, 0.2);
   font-size: 9px; line-height: 1.8; color: #6e8ba3;
@@ -1309,6 +1310,37 @@ button { font-family: inherit; cursor: pointer; }
 }
 .seal-flash { color: var(--gold); }
 
+/* ---------- 当日公开信标状态 / 来源标记 ---------- */
+.seal-beacon {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; padding: 9px 11px;
+  border: 1px solid rgba(255, 204, 102, 0.34); background: rgba(255, 204, 102, 0.06);
+}
+.seal-beacon.ok { border-color: rgba(61, 255, 168, 0.34); background: rgba(61, 255, 168, 0.05); }
+.beacon-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--gold); box-shadow: 0 0 8px var(--gold);
+}
+.seal-beacon.ok .beacon-dot { background: #3dffa8; box-shadow: 0 0 8px #3dffa8; }
+.beacon-main { display: flex; flex-direction: column; gap: 3px; flex: 1 1 250px; min-width: 0; }
+.beacon-main b { font-size: 10px; font-weight: 500; color: #eafcff; }
+.beacon-main span { font-family: var(--font-mono); font-size: 9px; color: #9dc4d6; word-break: break-all; }
+.seal-beacon .seal-ghost { margin-left: 0; }
+.seal-card button:disabled { opacity: 0.5; cursor: default; }
+.beacon-link {
+  color: var(--cyan); font-size: 9px; text-decoration: none; white-space: nowrap;
+  border-bottom: 1px dotted rgba(0, 240, 255, 0.5);
+}
+.beacon-link:hover { color: #eafcff; }
+.beacon-hint { margin-top: 8px; }
+.seal-result.pending { color: #9dc4d6; background: rgba(0, 240, 255, 0.05); border-color: rgba(0, 240, 255, 0.26); }
+.seal-src {
+  font-family: var(--font-mono); font-size: 8px; padding: 1px 5px;
+  letter-spacing: 0.06em; border: 1px solid;
+}
+.seal-src.public { color: #7fe6b4; border-color: rgba(61, 255, 168, 0.5); background: rgba(61, 255, 168, 0.07); }
+.seal-src.local, .seal-src.legacy { color: var(--gold); border-color: rgba(255, 204, 102, 0.45); background: rgba(255, 204, 102, 0.06); }
+
 @media (max-width: 860px) {
   .seal-card { width: calc(100vw - 18px); max-height: 86vh; padding: 14px 13px 12px; }
   .seal-intro { font-size: 10px; line-height: 1.7; }
@@ -1318,6 +1350,9 @@ button { font-family: inherit; cursor: pointer; }
   .seal-pg, .seal-time, .seal-prev { font-size: 8px; }
   .seal-detail { grid-template-columns: repeat(2, 1fr); gap: 4px 8px; }
   .seal-chip { font-size: 8px; padding: 1px 4px; }
+  .seal-beacon { gap: 6px; padding: 8px; }
+  .beacon-main { flex-basis: 100%; }
+  .beacon-main span { font-size: 8px; }
   .settle-seal { font-size: 8px; }
   .settle-seal b { display: none; }
 }

@@ -6,10 +6,11 @@ import {
 import {
   BOUNTY_MIN, BOUNTY_MAX, BOUNTY_TIERS, WISH_STICK_LIMIT,
   TEMPLE_NEED, TEMPLE_POOL_BASE, TEMPLE_POOL_PER_OPENING,
-  dayKey, needFor, clampBounty, shareOf, earnedPart
+  needFor, clampBounty, shareOf, earnedPart
 } from '../temple/economy.js'
 import { sanitizePracticeSave, SEAL_KEEP } from '../temple/save.js'
 import { makeSeal, shortOf } from '../temple/seal.js'
+import { utcDayKey, fallbackDaySeed } from '../temple/beacon.js'
 
 const TRAVEL_MS = 2200
 const JUDGE_X = 18
@@ -29,8 +30,11 @@ const TEMPLE_VERSES = [
 ]
 const NAMES = ['青灯客', '无量', '0x木鱼', '半盏', '数据沙弥', '夜行僧', '空指针', '晚钟']
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
-/** 与每日额度用同一个本地日期口径，别让「今天」在 UTC 和本地之间错位 */
-const stampDay = () => Number(dayKey().replace(/-/g, ''))
+/** 首屏还没连上信标时的诚实降级：本机日期种子 + 明确标记，不冒充公开随机值 */
+const fallbackBeacon = () => {
+  const day = utcDayKey()
+  return { day, round: 0, seed: fallbackDaySeed(day), randomness: '', sources: [], status: 'local' }
+}
 
 let wishSeq = 10
 function newWish(overrides = {}) {
@@ -87,7 +91,11 @@ function makeMarket(temple) {
  * 所有数值本地模拟，不接链、不接钱包、不接服务端。
  */
 export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisual, onCelebrate, onPersist }) {
-  const daySeed = stampDay()
+  const beacon = ref(fallbackBeacon())
+  let daySeed = beacon.value.seed
+  /** 本炷快照：信标中途切换不影响正在敲的这一炷，下一炷才用新种子 */
+  let stickSeed = daySeed
+  let stickBeacon = { day: beacon.value.day, round: beacon.value.round }
   const running = ref(false)
   const phase = ref('idle')
   const round = ref(0)
@@ -284,7 +292,9 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
 
   function nextStick() {
     round.value += 1
-    pattern.value = makePattern(seedFrom(round.value, daySeed))
+    stickSeed = daySeed
+    stickBeacon = { day: beacon.value.day, round: beacon.value.round }
+    pattern.value = makePattern(seedFrom(round.value, stickSeed))
     marks.value = {}
     used = new Set()
     wildCount.value = 0
@@ -308,7 +318,8 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     // 一炷香 = 一个区块：把可复算的敲击记录串到上一张回执后面
     const seal = makeSeal({
       round: round.value,
-      daySeed,
+      daySeed: stickSeed,
+      beacon: stickBeacon,
       pattern: pattern.value,
       marks: marks.value,
       wild: wildCount.value,
@@ -555,6 +566,36 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     persist()
   }
 
+  /**
+   * 由 App 注入当日公开信标（或降级状态）。只影响下一炷的种子，
+   * 正在敲的这一炷仍用 stickSeed / stickBeacon 快照出印，回执始终自洽。
+   */
+  function applyBeacon(next) {
+    if (!next || typeof next.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(next.day) ||
+        !Number.isInteger(next.round) || next.round < 0 || !Number.isFinite(next.seed)) return false
+    const seed = next.round > 0 ? (next.seed >>> 0) : fallbackDaySeed(next.day)
+    if (!Number.isFinite(seed)) return false
+    const status = next.status || (next.round > 0 ? 'public' : 'local')
+    const changed = daySeed !== seed || beacon.value.status !== status
+    daySeed = seed
+    beacon.value = {
+      day: next.day,
+      round: next.round,
+      seed,
+      randomness: typeof next.randomness === 'string' ? next.randomness : '',
+      sources: Array.isArray(next.sources) ? next.sources : [],
+      status
+    }
+    // 还没点「入寺」：预热本炷快照，让第一张回执就用上公开信标，
+    // 而不是等第二炷才生效。一旦开敲就保持快照不动，避免半炷换节拍表。
+    if (!running.value && round.value === 0) {
+      stickSeed = daySeed
+      stickBeacon = { day: next.day, round: next.round }
+      pattern.value = makePattern(seedFrom(0, stickSeed))
+    }
+    return changed
+  }
+
   function runLoop() {
     raf = requestAnimationFrame(frame)
     timer = setInterval(simulate, 700)
@@ -610,6 +651,7 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   return reactive({
     running, phase, round, pattern, marks, elapsed, chain, wildCount,
     lastGrade, gradeKey, gradeVisible, settlement, seals, lastSeal, showSeals,
+    beacon, applyBeacon,
     lamp, lampPct, online, openings,
     templePool, templeCycles, templeId, wishes, activeWish, activeWishId,
     showRules, myWishText, wishBounty,

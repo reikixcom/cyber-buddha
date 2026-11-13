@@ -7,9 +7,16 @@
  * 别人拿到这串文本，用同一份开源规则重算节拍表与结算，就能验证
  * 「按寺规，这串敲击记录确实该得这些功德」，以及链有没有被改过。
  *
- * 边界说清楚：这是本地原型的弱验证。它防的是回执在粘贴、转发、存档中
- * 被改动，不证明「真人真的敲了」——没有服务端与可信时钟，本机数据本来
- * 就能自己造。正式版把 daySeed 换成公开随机信标即可，判定与结算不用改。
+ * v2 起当日种子改由 drand quicknet 公开随机信标派生（见 beacon.js），
+ * 回执额外带上 UTC 日期与信标轮次，别人可以拿去公开端点对账，
+ * 确认项目方没有预先挑种子、也没有事后改。判定与结算逻辑完全没变：
+ * seedFrom → makePattern → settle 一行都没动。
+ * 拿不到信标时明确降级为本机日期种子，回执标 beaconRound = 0，不冒充。
+ *
+ * 边界说清楚：验签分两层。这里是离线的「规则复算」，防的是回执在粘贴、
+ * 转发、存档中被改动，以及项目方偷偷改寺规；联网的「公开信标对账」在
+ * beacon.js。两层都不证明「真人真的敲了」——没有服务端与可信时钟，
+ * 本机数据本来就能自己造。禅印证明的是「这串记录按规则该得这些功德」。
  *
  * 纯函数：不依赖 Vue / DOM / Web Crypto，Node 与浏览器算出的结果完全一致，
  * 所以规则可以直接用 node --test 对拍。
@@ -54,8 +61,9 @@ function utf8Bytes(str) {
   return out
 }
 
-export function sha256Hex(msg) {
-  const bytes = utf8Bytes(String(msg))
+/** 字节数组版：公开信标要用它校验 randomness = sha256(signature) */
+export function sha256BytesHex(bytesIn) {
+  const bytes = Array.from(bytesIn)
   const hi = Math.floor(bytes.length / 0x20000000)
   const lo = (bytes.length * 8) >>> 0
   bytes.push(0x80)
@@ -96,6 +104,11 @@ export function sha256Hex(msg) {
     H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0
   }
   return Array.from(H, (x) => x.toString(16).padStart(8, '0')).join('')
+}
+
+/** 字符串版：哈希结果必须与改造前逐字节一致（有对拍测试兜底） */
+export function sha256Hex(msg) {
+  return sha256BytesHex(utf8Bytes(String(msg)))
 }
 
 /* ------------------------------------------------------------------ *
@@ -171,14 +184,20 @@ const isInt = (n, min, max) => Number.isInteger(n) && n >= min && n <= max
 
 /**
  * 造一张回执。prev 传上一张的短码，串成一条链。
+ *
+ * 不传 beacon 时出 v1（旧存档、旧调用、对拍测试保持原样）；传了就出 v2：
+ *   beacon = { day: 'YYYY-MM-DD'(UTC), round: 当日公开信标轮次 }
+ *   round = 0 表示信标没连上，明确降级为本机日期种子，不冒充公开随机值。
  * payload 用定长数组而非对象，是为了让回执短到能直接贴进聊天框。
- * [版本, 第几炷, 日种子, 节拍种子, 64拍, 乱敲数, 在场人数, 合拍率, 功德, 前序短码, 时间戳秒]
+ * v1: [1, 第几炷, 日种子, 节拍种子, 64拍, 乱敲数, 在场人数, 合拍率, 功德, 前序短码, 时间戳秒]
+ * v2: [2, ...同上..., 时间戳秒, UTC日期, 信标轮次]
  */
-export function makeSeal({ round, daySeed, pattern, marks, wild = 0, online, result, prev = '', at = Date.now() }) {
+export function makeSeal({ round, daySeed, pattern, marks, wild = 0, online, result, prev = '', at = Date.now(), beacon = null }) {
+  const version = beacon ? 2 : 1
   const payload = [
-    1,
+    version,
     round | 0,
-    daySeed | 0,
+    Number(daySeed) >>> 0,
     pattern.seed >>> 0,
     encodeMarks(pattern, marks),
     Math.max(0, wild | 0),
@@ -188,14 +207,24 @@ export function makeSeal({ round, daySeed, pattern, marks, wild = 0, online, res
     typeof prev === 'string' ? prev.slice(0, SEAL_SHORT_LEN) : '',
     Math.floor(at / 1000)
   ]
+  if (beacon) payload.push(String(beacon.day), Math.max(0, Number(beacon.round) || 0))
   const text = pack(SEAL_PREFIX, b64encode(JSON.stringify(payload)))
   return {
     text,
     short: text.slice(-SEAL_SHORT_LEN),
-    round, daySeed, seed: pattern.seed, marks: payload[4], wild: payload[5],
+    version,
+    round, daySeed: payload[2], seed: pattern.seed, marks: payload[4], wild: payload[5],
     online: payload[6], accuracy: payload[7], reward: payload[8], prev: payload[9], at: payload[10],
+    dayTag: beacon ? payload[11] : '',
+    beaconRound: beacon ? payload[12] : 0,
     perfect: result.perfect, good: result.good, miss: result.miss
   }
+}
+
+const isDayTag = (s) => {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false
+  const t = Date.parse(`${s}T00:00:00Z`)
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s
 }
 
 /** 独立复算：不信任回执里的任何结论，只按种子重建节拍表再跑一次结算 */
@@ -205,15 +234,33 @@ export function verifySeal(text) {
   if (!u) return fail('不是有效的禅印回执，或校验码不符 —— 文本可能被改动、截断')
   let a
   try { a = JSON.parse(u.decoded) } catch { return fail('回执内容无法解析') }
-  if (!Array.isArray(a) || a.length !== 11 || a[0] !== 1) return fail('回执版本或字段数不对')
+  const version = Array.isArray(a) ? a[0] : 0
+  if (!Array.isArray(a) ||
+      (version === 1 && a.length !== 11) ||
+      (version === 2 && a.length !== 13) ||
+      (version !== 1 && version !== 2)) {
+    return fail('回执版本或字段数不对')
+  }
 
   const [v, round, daySeed, seed, m, wild, online, acc, reward, prev, at] = a
-  if (!isInt(round, 1, 1e7) || !isInt(daySeed, 20000101, 99991231) ||
+  const dayTag = version === 2 ? a[11] : ''
+  const beaconRound = version === 2 ? a[12] : 0
+  const daySeedOk = version === 2 && beaconRound > 0
+    ? isInt(daySeed, 0, 0xffffffff)
+    : isInt(daySeed, 20000101, 99991231)
+  if (!isInt(round, 1, 1e7) || !daySeedOk ||
       !isInt(seed, 0, 0xffffffff) || !isInt(wild, 0, 1e5) || !isInt(online, 0, 1e7) ||
       !isInt(reward, 0, 10000) || !isInt(at, 0, 1e12) ||
       typeof acc !== 'number' || !Number.isFinite(acc) || acc < 0 || acc > 1 ||
       typeof prev !== 'string' || (prev !== '' && !/^[0-9a-f]{1,16}$/.test(prev))) {
     return fail('回执字段超出合法范围')
+  }
+  if (version === 2) {
+    if (!isDayTag(dayTag) || !isInt(beaconRound, 0, 1e12)) return fail('信标日期或轮次不合法')
+    // 降级回执必须自己承认是本机种子，绝不允许拿日期整数冒充公开随机值
+    if (beaconRound === 0 && Number(dayTag.replace(/-/g, '')) !== daySeed) {
+      return fail('本机弱验证回执的种子与日期对不上')
+    }
   }
   if (typeof m !== 'string' || m.length !== BEATS_PER_STICK || /[^PGM]/.test(m)) {
     return fail(`敲击记录应为 ${BEATS_PER_STICK} 拍的 P/G/M 串`)
@@ -228,13 +275,19 @@ export function verifySeal(text) {
     return fail(`按寺规复算不一致：应为合拍率 ${round4(r.accuracy)} / ${Math.round(r.reward)} $G`)
   }
 
+  const source = version === 1 ? 'legacy' : beaconRound > 0 ? 'public' : 'local'
+  const reason = source === 'public'
+    ? '校验通过 · 节拍与结算可复算，当日种子来自公开信标（可在线对账）'
+    : source === 'local'
+      ? '校验通过（本机弱验证）· 规则可复算，当日种子未经公开信标确认'
+      : '校验通过 · 节拍表、判定与功德均可由开源规则复算'
   return {
     ok: true,
-    reason: '校验通过 · 节拍表、判定与功德均可由开源规则复算',
+    reason,
     seal: {
       text: `${SEAL_PREFIX}.${u.body}.${u.short}`,
-      short: u.short, round, daySeed, seed, marks: m, wild, online,
-      accuracy: acc, reward, prev, at,
+      short: u.short, version, source, round, daySeed, seed, marks: m, wild, online,
+      accuracy: acc, reward, prev, at, dayTag, beaconRound,
       perfect: r.perfect, good: r.good, miss: r.miss
     }
   }

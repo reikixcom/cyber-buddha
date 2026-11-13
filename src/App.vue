@@ -12,6 +12,9 @@ import {
   ritualCheck, applyRitual, emitCredit
 } from './temple/economy.js'
 import { snapshotPractice, STORE_KEY } from './temple/save.js'
+import {
+  utcDayKey, loadCachedBeacon, fetchDayBeacon, cacheBeacon
+} from './temple/beacon.js'
 
 const RANKS = [
   { min: 0, name: '初入山门' },
@@ -64,6 +67,9 @@ let getPracticeSnapshot = () => null
 let pendingPracticeSave = null
 let autoSaveTimer = 0
 let dayTimer = 0
+/** 信标按 UTC 换日，与本地日的额度重置各自独立判断 */
+let beaconDay = utcDayKey()
+let beaconBusy = false
 /** 拦截提示去重：点击瞬间提示过，动画结束就不重复弹 */
 const lastNotify = {}
 
@@ -267,14 +273,46 @@ function resetAll() {
   addToast('账本已清零', '放下执念，重新开始')
 }
 
+/**
+ * 首屏先用昨夜缓存立刻开局，再联网向多个独立端点交叉核对。
+ * 连不上就保持「本机弱验证」降级，绝不拿本机日期冒充公开随机值。
+ */
+async function refreshBeacon() {
+  if (beaconBusy) return
+  beaconBusy = true
+  const day = utcDayKey()
+  try {
+    const b = await fetchDayBeacon(day)
+    if (b) {
+      cacheBeacon(b)
+      practice.applyBeacon(b)
+      pushLog(`公开信标已核对 · ${b.sources.length} 个独立端点一致 · 第 ${b.round} 轮`, true)
+      // 已经开敲就不半炷换节拍表，明确告知玩家从哪一炷开始生效
+      if (practice.round > 0 && practice.running) {
+        pushLog('本炷已开敲 · 公开种子从下一炷起生效，本炷回执标「本机」')
+      }
+    } else {
+      pushLog('公开信标未连通 · 本日回执标「本机弱验证」')
+    }
+  } catch {
+    pushLog('公开信标未连通 · 本日回执标「本机弱验证」')
+  } finally {
+    beaconDay = day // 今天已尝试过，别每 15 秒刷一次失败日志
+    beaconBusy = false
+  }
+}
+
 /** 挂机跨过午夜也要重置额度，不能只在 load() 时看一次 */
 function checkNewDay() {
-  if (daily.value.day === dayKey()) return
-  daily.value = freshDaily()
-  taskDone.value = { incense: false, bow: false, fish: false, bell: false }
-  pushLog('新的一日 · 香火额度与四法器次数已重置', true)
-  addToast('新的一日', `每日 ${DAILY_CAP} $G 额度已重置`)
-  save()
+  if (daily.value.day !== dayKey()) {
+    daily.value = freshDaily()
+    taskDone.value = { incense: false, bow: false, fish: false, bell: false }
+    pushLog('新的一日 · 香火额度与四法器次数已重置', true)
+    addToast('新的一日', `每日 ${DAILY_CAP} $G 额度已重置`)
+    save()
+  }
+  // UTC 零点是全球换功课的时刻，和本地时区的额度重置不是同一条线
+  if (beaconDay !== utcDayKey()) refreshBeacon()
 }
 const onPageHide = () => save()
 const onVisibility = () => { if (document.hidden) save() }
@@ -284,6 +322,12 @@ onMounted(() => {
   if (practice.restoreMarket(pendingPracticeSave)) {
     pushLog('本机存档已续上 · 心愿与香火进度仍在', true)
   }
+  const cached = loadCachedBeacon()
+  if (cached) {
+    practice.applyBeacon(cached)
+    pushLog('本机信标缓存已载入 · 正在联网核对当日公开随机值')
+  }
+  refreshBeacon()
   pushLog('共修协议就绪 · 第 1 炷香待燃')
   pushLog('WebGL 场景加载中...')
   window.addEventListener('keydown', onGlobalKey)

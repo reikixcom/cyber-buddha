@@ -2,6 +2,10 @@
 import { ref, computed, watch } from 'vue'
 import { verifySeal, verifyChain, packLedger, unpackLedger } from '../temple/seal.js'
 import { snapshotPractice, sanitizePracticeSave, STORE_KEY } from '../temple/save.js'
+import {
+  fetchDayBeacon, checkSealBeacon, beaconPublicUrl,
+  utcDayKey, cacheBeacon, BEACON_RELAYS
+} from '../temple/beacon.js'
 
 const props = defineProps({ p: { type: Object, required: true } })
 
@@ -9,6 +13,8 @@ const tab = ref('seals')
 const note = ref('')
 const verifyInput = ref('')
 const verifyResult = ref(null)
+const beaconCheck = ref(null)
+const beaconBusy = ref(false)
 const exportText = ref('')
 const importText = ref('')
 const ledgerPreview = ref(null)
@@ -23,8 +29,20 @@ const seals = computed(() => props.p.seals
 )
 // 本机只留最近 24 张，第一张的前序已被裁掉，跳过它的 prev 检查即可
 const chainState = computed(() => verifyChain(props.p.seals, { ignoreFirstPrev: true }))
+const beacon = computed(() => props.p.beacon || null)
+const beaconSeedHex = computed(() => (beacon.value?.seed ?? 0).toString(16).padStart(8, '0'))
+const beaconLabel = computed(() => {
+  const b = beacon.value
+  if (!b) return '本机弱验证'
+  if (b.status === 'public') return `${b.sources.length} 个独立端点一致`
+  if (b.status === 'cached') return '本机缓存 · 待联网核对'
+  return '本机弱验证'
+})
 
-const fmtDay = (d) => String(d).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3')
+const fmtDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d))
+  ? String(d)
+  : String(d).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3')
+const srcName = (s) => s === 'public' ? '信标' : s === 'local' ? '本机' : '旧版'
 function fmtTime(sec) {
   const d = new Date(sec * 1000)
   if (Number.isNaN(d.getTime())) return '—'
@@ -59,6 +77,7 @@ async function copy(text, label) {
 }
 
 function runVerify() {
+  beaconCheck.value = null
   const lines = verifyInput.value.split(/\s+/).map((s) => s.trim()).filter(Boolean)
   if (!lines.length) {
     verifyResult.value = { ok: false, reason: '先把一张禅印回执粘进来', count: 0, seal: null }
@@ -73,6 +92,41 @@ function runVerify() {
   verifyResult.value = {
     ok: c.ok, reason: c.reason, count: c.items.length,
     seal: c.items[0] || null, last: c.items[c.items.length - 1] || null
+  }
+}
+
+/** 手动重新同步当日信标：断网恢复后不用刷新整页 */
+async function resync() {
+  if (beaconBusy.value) return
+  beaconBusy.value = true
+  try {
+    const b = await fetchDayBeacon(utcDayKey())
+    if (b) {
+      cacheBeacon(b)
+      props.p.applyBeacon(b)
+      flash(`公开信标已同步 · ${b.sources.length} 源一致`)
+    } else {
+      flash('仍未连通 · 本日保持本机弱验证')
+    }
+  } catch {
+    flash('仍未连通 · 本日保持本机弱验证')
+  } finally {
+    beaconBusy.value = false
+  }
+}
+
+/** 在线对账：拿验签结果里的日期与轮次，去多个独立中继查回同一个公开随机值 */
+async function checkOnline() {
+  const seal = verifyResult.value?.last
+  if (!seal || beaconBusy.value) return
+  beaconBusy.value = true
+  beaconCheck.value = { pending: true, ok: false, reason: '正在向多个独立端点核对…' }
+  try {
+    beaconCheck.value = await checkSealBeacon(seal)
+  } catch {
+    beaconCheck.value = { ok: false, reason: '核对失败，请稍后重试' }
+  } finally {
+    beaconBusy.value = false
   }
 }
 
@@ -114,6 +168,7 @@ function applyLedger() {
   location.reload()
 }
 
+watch(verifyInput, () => { beaconCheck.value = null })
 watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledgerError.value = '' })
 </script>
 
@@ -130,10 +185,27 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
         </div>
 
         <p class="seal-intro">
-          敲完一炷香就出一张回执：第几炷、六十四拍的判定、在场人数、该得多少功德，
-          加上一张短码。短码像页码 —— 后一张写着前一张的短码，改中间任何一张，后面就接不上。
-          别人把回执贴进「验签」，用同一份开源寺规重算节拍表和结算，对不上会直接指出哪里不对。
+          敲完一炷香就出一张回执：第几炷、六十四拍判定、在场人数、该得多少功德，
+          加一张短码串成链，改中间任何一张后面就接不上。当日功课种子取自 drand quicknet
+          公开随机信标：别人贴进「验签」，既能离线按开源寺规重算，也能联网到官方端点对账。
         </p>
+
+        <div class="seal-beacon" :class="beacon?.status === 'public' ? 'ok' : 'weak'">
+          <span class="beacon-dot"></span>
+          <div class="beacon-main">
+            <b>当日功课种子 · {{ beacon?.status === 'public' ? 'drand quicknet 公开信标' : '本机弱验证' }}</b>
+            <span v-if="beacon?.round">
+              UTC {{ beacon.day }} · 第 {{ beacon.round }} 轮 · 种子 {{ beaconSeedHex }} · {{ beaconLabel }}
+            </span>
+            <span v-else>
+              UTC {{ utcDayKey() }} · 连不上信标，回执会明确标注「本机」，绝不冒充公开随机值
+            </span>
+          </div>
+          <button class="seal-ghost clickable" :disabled="beaconBusy" @click="resync">
+            {{ beaconBusy ? '核对中…' : '重新同步' }}
+          </button>
+          <a v-if="beacon?.round" class="beacon-link" :href="beaconPublicUrl(beacon.round)" target="_blank" rel="noopener noreferrer">查该轮 ↗</a>
+        </div>
 
         <div class="seal-tabs">
           <button class="seal-tab clickable" :class="{ on: tab === 'seals' }" @click="tab = 'seals'">本机回执 · {{ seals.length }}</button>
@@ -151,6 +223,7 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
             <div v-for="s in seals" :key="s.short" class="seal-row">
               <div class="seal-row-main">
                 <span class="seal-round">第 {{ s.round }} 炷</span>
+                <span class="seal-src" :class="s.source">{{ srcName(s.source) }}</span>
                 <span class="seal-acc">{{ Math.round(s.accuracy * 100) }}%</span>
                 <span class="seal-reward">+{{ s.reward }} $G</span>
                 <span class="seal-pg">{{ s.perfect }}P / {{ s.good }}G / {{ s.miss }}M</span>
@@ -177,7 +250,7 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
           ></textarea>
           <div class="seal-actions">
             <button class="seal-primary clickable" @click="runVerify">按寺规复算</button>
-            <span class="seal-hint">不需要联网，规则就在这份前端里</span>
+            <span class="seal-hint">第一层 · 离线可用，规则就在这份前端里</span>
           </div>
           <div v-if="verifyResult" class="seal-result" :class="verifyResult.ok ? 'ok' : 'bad'">
             <div class="seal-result-title">
@@ -185,7 +258,7 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
             </div>
             <div v-if="verifyResult.last" class="seal-detail">
               <span>第 <b>{{ verifyResult.last.round }}</b> 炷</span>
-              <span>日期 <b>{{ fmtDay(verifyResult.last.daySeed) }}</b></span>
+              <span>功课日 <b>{{ fmtDay(verifyResult.last.dayTag || verifyResult.last.daySeed) }}<template v-if="verifyResult.last.version === 2"> UTC</template></b></span>
               <span>合拍率 <b>{{ Math.round(verifyResult.last.accuracy * 100) }}%</b></span>
               <span>PERFECT <b>{{ verifyResult.last.perfect }}</b></span>
               <span>GOOD <b>{{ verifyResult.last.good }}</b></span>
@@ -193,16 +266,39 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
               <span>乱敲 <b>{{ verifyResult.last.wild }}</b></span>
               <span>在场 <b>{{ verifyResult.last.online }}</b></span>
               <span>应得 <b>{{ verifyResult.last.reward }} $G</b></span>
+              <span>种子来源 <b>{{ srcName(verifyResult.last.source) }}</b></span>
+              <span v-if="verifyResult.last.beaconRound">信标轮次 <b>{{ verifyResult.last.beaconRound }}</b></span>
               <span>短码 <b>{{ verifyResult.last.short }}</b></span>
             </div>
             <div v-if="verifyResult.count > 1" class="seal-hint">
               共 {{ verifyResult.count }} 张 · 上面显示的是最后一张的复算结果
             </div>
           </div>
+
+          <div v-if="verifyResult?.last?.source === 'public'" class="seal-actions">
+            <button class="seal-ghost clickable" :disabled="beaconBusy" @click="checkOnline">
+              {{ beaconBusy ? '核对中…' : '核对公开信标' }}
+            </button>
+            <span class="seal-hint">第二层 · 需联网，并发查 {{ BEACON_RELAYS.length }} 个独立中继，至少 2 源一致才采信</span>
+          </div>
+          <div v-if="beaconCheck" class="seal-result" :class="beaconCheck.pending ? 'pending' : (beaconCheck.ok ? 'ok' : 'bad')">
+            <div class="seal-result-title">
+              {{ beaconCheck.pending ? '… ' : (beaconCheck.ok ? '✓ ' : '✕ ') }}{{ beaconCheck.reason }}
+            </div>
+            <div v-if="beaconCheck.ok" class="seal-detail">
+              <span class="beacon-sources">采信端点 <b>{{ beaconCheck.beacon.sources.join(' / ') }}</b></span>
+              <span>该轮随机值 <b>{{ beaconCheck.beacon.randomness.slice(0, 16) }}…</b></span>
+            </div>
+            <div v-if="beaconCheck.ok" class="seal-hint beacon-hint">
+              <a class="beacon-link" :href="beaconPublicUrl(beaconCheck.beacon.round)" target="_blank" rel="noopener noreferrer">打开官方端点自行复核该轮签名 ↗</a>
+            </div>
+          </div>
+
           <div class="seal-note">
-            边界说清楚：验证的是「这串敲击记录按寺规该得这些功德」，不证明「真人真的敲了」——
-            本地原型没有服务端和可信时钟。当前日期种子由本机生成，正式版换成公开随机信标即可，
-            判定与结算逻辑一行都不用改。
+            边界说清楚：离线复算证明「这串记录按寺规该得这些功德」，在线对账证明「当日种子确实来自那一轮公开随机值」；
+            两者都不证明「真人真的敲了」—— 原型没有服务端和可信时钟。前端不做 BLS 阈值签名验签，
+            采信的是「至少两个独立中继一致」，需要免信任可用 drand 官方工具对签名完整验签。
+            信标连不上时会明确降级并在回执里标「本机」，不冒充。
           </div>
         </div>
 
