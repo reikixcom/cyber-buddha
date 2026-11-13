@@ -546,6 +546,47 @@ button { font-family: inherit; cursor: pointer; }
 }
 .start-desc em { font-style: normal; color: var(--gold); }
 
+/* ---------- 首屏三步引导：来的第一眼要知道「我在这干什么、凭什么值得留下」 ---------- */
+.start-lede {
+  margin: 18px auto 0; max-width: 520px;
+  font-size: 15px; line-height: 1.95; letter-spacing: 0.1em; color: #d8eef7;
+}
+.start-steps {
+  margin: 26px auto 0; max-width: 660px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: left;
+}
+.start-step {
+  padding: 13px 14px 14px; border-radius: 10px;
+  border: 1px solid rgba(0, 240, 255, 0.16);
+  background: linear-gradient(160deg, rgba(0, 240, 255, 0.06), rgba(6, 12, 22, 0.5));
+}
+.start-step b {
+  display: block; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.24em; color: rgba(0, 240, 255, 0.7);
+}
+.start-step h3 { margin: 6px 0 6px; font-size: 13px; letter-spacing: 0.08em; color: #eafcff; font-weight: 600; }
+.start-step p { margin: 0; font-size: 11px; line-height: 1.75; color: #8fa9ba; }
+.start-live {
+  margin: 20px auto 0; display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 13px; border-radius: 999px;
+  border: 1px solid rgba(110, 139, 163, 0.28); background: rgba(8, 16, 26, 0.6);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: #7d94a6;
+}
+.start-live.on { color: #9ef2e6; border-color: rgba(0, 240, 255, 0.35); }
+.start-foot-stats { margin-top: 7px; color: #3d5262; }
+.start-reset {
+  margin-left: 10px; padding: 0; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: 9px; letter-spacing: inherit; color: #4a6274;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.start-reset:hover { color: #8aa6bb; }
+
+@media (max-width: 720px) {
+  .start-steps { grid-template-columns: 1fr; gap: 9px; }
+  .start-lede { font-size: 14px; }
+  .start-step p { font-size: 11px; }
+}
+
 .start-actions { margin-top: 34px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
 .btn-main {
   position: relative;
@@ -866,6 +907,33 @@ button { font-family: inherit; cursor: pointer; }
 }
 .rules-btn:hover { background: rgba(255, 204, 102, 0.2); }
 .demo-tag { margin-top: 7px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; color: #6e8ba3; }
+
+/* 共修网络状态条：连上公共公告板时是青色的「活」点，离线时明确转灰 */
+.live-strip {
+  margin-top: 7px; display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.04em;
+  color: #6e8ba3; min-width: 0;
+}
+.live-dot {
+  width: 5px; height: 5px; border-radius: 50%; flex: 0 0 auto;
+  background: #6e8ba3; box-shadow: 0 0 0 rgba(110, 139, 163, 0.5);
+}
+.live-strip.on { color: var(--cyan, #5ff2e0); }
+.live-strip.on .live-dot {
+  background: var(--cyan, #5ff2e0); animation: livePulse 2.4s ease-out infinite;
+}
+@keyframes livePulse {
+  0% { box-shadow: 0 0 0 0 rgba(95, 242, 224, 0.55); }
+  70% { box-shadow: 0 0 0 6px rgba(95, 242, 224, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(95, 242, 224, 0); }
+}
+.live-text { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-souls {
+  flex: 1 1 auto; text-align: right; color: #8aa6bb;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.live-strip.on .live-souls { color: #cfe9ff; }
+.wish-remote { font-size: 9px; color: #6e8ba3; font-family: var(--font-mono); }
 
 .wish-head { display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 8px; }
 .wish-sub { font-size: 9px; color: #6e8ba3; }

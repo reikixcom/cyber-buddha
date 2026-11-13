@@ -88,9 +88,10 @@ function makeMarket(temple) {
 
 /**
  * 共修原型：节奏敲木鱼 + 长明灯 + 多人共诵悬赏 + 常住共修愿。
- * 所有数值本地模拟，不接链、不接钱包、不接服务端。
+ * 余额、托管、禅印都在本机；「谁在寺里、谁在诵哪条愿」来自公共公告板，
+ * 连不上才退回本地演示，并在界面上明确标出来。
  */
-export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisual, onCelebrate, onPersist, onSeal }) {
+export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisual, onCelebrate, onPersist, onSeal, onBroadcast }) {
   const beacon = ref(fallbackBeacon())
   let daySeed = beacon.value.seed
   /** 本炷快照：信标中途切换不影响正在敲的这一炷，下一炷才用新种子 */
@@ -129,6 +130,13 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   const showRules = ref(false)
   const myWishText = ref('')
   const wishBounty = ref(20)
+  /**
+   * 共修网络是否已接上公共公告板。
+   * 接上 = 在线人数与万佛墙是真人真事；接不上 = 退回本地演示，并且要标出来。
+   * 这两件事必须在界面上分得清，否则「1480 人在线」就是骗人。
+   */
+  const netLive = ref(false)
+  const netOnline = ref(0)
 
   let used = new Set()
   let stickStart = 0
@@ -233,6 +241,18 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   function deliver(w) {
     if (w.done) return
     if (w.kind === 'temple') { settleTemple(w); return }
+    // 别人的愿：诵满了就上报，但钱不在本地凭空发 —— 得等愿主还愿、用功德票付
+    if (w.remote) {
+      w.done = true
+      w.deliveredAt = Date.now()
+      const myHits = w.contributors?.['你'] || 0
+      addToast('共诵圆满', `「${w.text}」诵满 ${w.need} 击 · 已上报，等愿主还愿付票`)
+      pushLog(`为「${w.text}」诵满 ${w.need} 击${myHits ? ` · 你 ${myHits} 击` : ''} · 等愿主还愿`, true)
+      if (activeWishId.value === w.id) activeWishId.value = templeId
+      onBroadcast?.({ type: 'deliver', wish: w, hits: myHits })
+      persist()
+      return
+    }
     w.done = true
     w.deliveredAt = Date.now()
     const people = Object.keys(w.contributors || {}).length
@@ -243,8 +263,9 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
       addToast('心愿送达 · 按击数分赏', `+${due} $GONGDE · 你 ${myHits} 击 / ${people} 人共诵（转移，不占每日额度）`)
       pushLog(`共诵圆满 ·「${w.text}」${people} 人送达，你分得 ${due} $G`, true)
     } else if (w.mine) {
-      addToast('你的心愿已送达', `${people} 位共修者一起敲满 ${w.need} 下`)
+      addToast('你的心愿已送达', `${people} 位共修者一起敲满 ${w.need} 下 · 记得还愿`)
       pushLog(`${people} 位共修者为你的心愿「${w.text}」代诵圆满`, true)
+      pushLog('还愿：禅印 → 功德票，把你的票转一张给替你诵的同修')
     } else {
       pushLog(`${w.worker || '共修者'} 领诵 ·「${w.text}」${people} 人共诵圆满`)
     }
@@ -261,7 +282,7 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   function expireWishes() {
     let changed = false
     for (const w of wishes.value) {
-      if (w.kind === 'temple' || w.done) continue
+      if (w.kind === 'temple' || w.done || w.remote) continue
       w.sticks += 1
       changed = true
       if (w.sticks < WISH_STICK_LIMIT) continue
@@ -373,11 +394,99 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     if (e >= pattern.value.duration) finishStick()
   }
 
+  /** 真实在线人数来自公共公告板；接不上时保留本地演示值，但界面会标明 */
+  function setOnline(n) {
+    if (!Number.isFinite(n) || n < 0) return
+    netOnline.value = Math.max(0, Math.round(n))
+    online.value = Math.max(1, netOnline.value)
+  }
+
+  /**
+   * 把公告板上的真实愿单并进万佛墙。
+   * 自己的愿留在本地（托管扣的是本地功德），别人的愿只读 —— 进度以网络为准，
+   * 本地敲击即时显示，取最大值保证不会被下一次聚合「倒扣」。
+   */
+  function applyRemote(list) {
+    if (!Array.isArray(list)) return
+    // 自己挂的愿在本地（托管扣的是本地功德），但进度要听网络的 —— 别人替我诵了多少，得看得见
+    for (const r of list) {
+      if (!r || !r.mine || !r.id) continue
+      const local = wishes.value.find((w) => w.mine && w.remoteId === r.id)
+      if (!local) continue
+      local.progress = Math.max(local.progress, Math.min(r.progress || 0, local.need))
+      local.crowd = Math.max(local.crowd || 0, r.crowd || 0)
+      if (r.done && !local.done) {
+        local.progress = local.need
+        deliver(local)
+      }
+    }
+
+    const prev = new Map(wishes.value.filter((w) => w.remote).map((w) => [w.id, w]))
+    const next = []
+    for (const r of list) {
+      if (!r || !r.id || r.mine) continue
+      const id = 'r:' + r.id
+      const old = prev.get(id)
+      const mine = old?.contributors?.['你'] || 0
+      const contributors = {}
+      for (const p of r.participants || []) contributors[p.name || '同修'] = 0
+      if (mine) contributors['你'] = mine
+      next.push({
+        id,
+        remote: true,
+        remoteId: r.id,
+        text: r.wish,
+        bounty: r.bounty,
+        need: r.need,
+        progress: Math.max(r.progress || 0, old?.progress || 0),
+        contributors,
+        crowd: Math.max(r.crowd || 0, Object.keys(contributors).length),
+        sticks: 0,
+        cycle: 0,
+        done: !!r.done,
+        mine: false,
+        owner: r.ownerName || '同修',
+        postedAt: (r.at || 0) * 1000
+      })
+    }
+    const temple = wishes.value.find((w) => w.kind === 'temple')
+    // 第一次接上公告板时，把常住愿上演示期的假共修者清掉：真人来了就别留布景
+    if (!netLive.value && temple) {
+      temple.contributors = {}
+      temple.crowd = 0
+      temple.progress = 0
+    }
+    const mineLocal = wishes.value.filter((w) => w.mine && w.kind !== 'temple')
+    wishes.value = temple ? [temple, ...mineLocal, ...next] : [...mineLocal, ...next]
+    if (activeWishId.value !== templeId && !wishes.value.some((w) => w.id === activeWishId.value)) {
+      activeWishId.value = templeId
+      addToast('共诵的愿已圆满', '回到常住共修愿，香火不断')
+    }
+    netLive.value = true
+  }
+
+  /** 我在某条愿上敲了多少击：心跳要用它上报给公告板 */
+  function hitsOn(wishId) {
+    const w = wishes.value.find((x) => x.id === wishId)
+    return w?.contributors?.['你'] || 0
+  }
+
   /** 模拟共修者：每个心愿同时有好几个人在敲，没有「抢单」这回事 */
   function simulate() {
-    online.value = Math.max(900, Math.min(2600, online.value + Math.round((Math.random() - 0.5) * 46)))
     addLamp(0.9 + Math.random() * 0.8)
+    const now = Date.now()
 
+    // 接上公共公告板后，共诵者只认真人：不再往任何愿里塞假贡献
+    if (netLive.value) {
+      const live = wishes.value.filter((w) => w.kind === 'temple' || !w.done || now - (w.deliveredAt || now) < 5000)
+      const templeLive = live.find((w) => w.kind === 'temple')
+      const mineLive = live.filter((w) => w.mine && w.kind !== 'temple')
+      const otherLive = live.filter((w) => w.remote && !w.mine).slice(0, 8)
+      wishes.value = templeLive ? [templeLive, ...mineLive, ...otherLive] : [...mineLive, ...otherLive]
+      return
+    }
+
+    online.value = Math.max(900, Math.min(2600, online.value + Math.round((Math.random() - 0.5) * 46)))
     const shuffled = [...NAMES].sort(() => Math.random() - 0.5)
     for (const w of wishes.value) {
       if (w.done) continue
@@ -391,7 +500,6 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
       }
     }
 
-    const now = Date.now()
     const live = wishes.value.filter((w) => w.kind === 'temple' || !w.done || now - (w.deliveredAt || now) < 5000)
     // 市场里始终留一条速成单和一条长线单，人少时玩家照样有得选
     const open = live.filter((w) => w.kind !== 'temple' && !w.done && !w.mine)
@@ -443,6 +551,7 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
       return
     }
     activeWishId.value = w.id
+    if (w.remote) onBroadcast?.({ type: 'join', wish: w })
     const people = Object.keys(w.contributors || {}).length
     addToast('已加入共诵', `${people} 人正在敲 · 悬赏按击数分，先敲先记`)
     pushLog(`加入共诵 ·「${w.text}」悬赏 ${w.bounty} $G / ${w.need} 击 · ${people} 人同诵`)
@@ -460,11 +569,14 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     addBalance(-bounty, 'transfer')
     const temple = wishes.value.find((w) => w.kind === 'temple')
     const rest = wishes.value.filter((w) => w.kind !== 'temple')
+    const created = newWish({ text, owner: '你', bounty, mine: true })
     wishes.value = [
       ...(temple ? [temple] : []),
-      newWish({ text, owner: '你', bounty, mine: true }),
+      created,
       ...rest
     ]
+    // 挂到公共公告板上，别人才看得见、才可能来替你诵
+    onBroadcast?.({ type: 'post', wish: created })
     myWishText.value = ''
     addToast('心愿已挂上万佛墙', `${bounty} $G 已托管 · 需共诵 ${needFor(bounty)} 击，多人一起敲`)
     pushLog(`万佛墙新增心愿 ·「${text}」悬赏 ${bounty} $G`, true)
@@ -655,6 +767,7 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     lastGrade, gradeKey, gradeVisible, settlement, seals, lastSeal, showSeals,
     beacon, applyBeacon,
     lamp, lampPct, online, openings,
+    netLive, netOnline, applyRemote, setOnline, hitsOn,
     templePool, templeCycles, templeId, wishes, activeWish, activeWishId,
     showRules, myWishText, wishBounty,
     beatDone, accuracyNow, beatsOnTrack, countdown, judgeX: JUDGE_X,

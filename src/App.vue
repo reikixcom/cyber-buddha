@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import StartScreen from './components/StartScreen.vue'
 import HudOverlay from './components/HudOverlay.vue'
 import PracticeDeck from './components/PracticeDeck.vue'
@@ -8,6 +8,7 @@ import Joystick from './components/Joystick.vue'
 import { TempleEngine } from './temple/TempleEngine.js'
 import { usePractice } from './composables/usePractice.js'
 import { useLedger } from './composables/useLedger.js'
+import { useSangha } from './composables/useSangha.js'
 import {
   RITUALS, DAILY_CAP, freshDaily, normalizeDaily, dayKey,
   ritualCheck, applyRitual, emitCredit
@@ -154,6 +155,9 @@ function addBalance(n, kind = 'transfer') {
   return credited
 }
 
+/** 共修网络：动作在 practice 里触发，真正发消息的是 sangha；两者互相依赖，用出口变量解开 */
+let broadcastToSangha = () => {}
+
 /** 功德票账本：出印自动认领、可转让、可拉公共流水审计。先于 practice 创建，供 onSeal 回调使用 */
 const ledger = useLedger({ merit, addBalance, pushLog, addToast })
 
@@ -172,14 +176,73 @@ const practice = usePractice({
     engine?.celebrate()
     if (typeof navigator.vibrate === 'function') navigator.vibrate([14, 60, 14])
   },
-  onPersist: save
+  onPersist: save,
+  onBroadcast: (e) => broadcastToSangha(e)
 })
 
 getPracticeSnapshot = () => snapshotPractice(practice)
 
+/** 真实在场与万佛墙：接上公共公告板才算数，接不上就退回本地演示并标明 */
+const sangha = useSangha({
+  id: ledger,
+  probe: () => {
+    const w = practice.activeWish
+    const remote = w && w.remote
+    return {
+      wishId: remote ? w.remoteId : '',
+      hits: remote ? practice.hitsOn(w.id) : 0
+    }
+  },
+  onEvent: (type, payload) => {
+    if (type === 'pull' && payload?.added) pushLog(`公告板收到 ${payload.added} 条共修消息`)
+  }
+})
+
+broadcastToSangha = async (e) => {
+  if (!e || !sangha.live) return
+  try {
+    if (e.type === 'post') {
+      const r = await sangha.postWish({ text: e.wish.text, bounty: e.wish.bounty, need: e.wish.need })
+      if (r.ok) {
+        // 记住公告板上的编号：待会儿别人替我诵的进度，要靠这个编号对回来
+        e.wish.remoteId = r.id
+        pushLog('心愿已广播到公共公告板 · 别的同修现在能看见了', true)
+      } else {
+        pushLog(`心愿广播失败：${r.reason} · 只有本机可见`)
+      }
+    } else if (e.type === 'join') {
+      const r = await sangha.join({ id: e.wish.remoteId })
+      if (!r.ok) pushLog(`接单广播失败：${r.reason}`)
+    } else if (e.type === 'deliver') {
+      const sealShort = practice.lastSeal?.short || ''
+      const r = await sangha.deliver({ id: e.wish.remoteId }, { hits: e.hits || 0, sealShort })
+      if (r.ok) pushLog(`送达已广播 · 愿主可在公告板看到你的禅印短码`, true)
+      else pushLog(`送达广播失败：${r.reason}`)
+    }
+  } catch (err) {
+    pushLog('共修广播异常：' + (err?.message || '未知错误'))
+  }
+}
+
+/**
+ * 公告板的真实数据流向玩法层：在线人数换成真人数，万佛墙换成真愿单。
+ * 注意别把「这次拉取失败」当成「没有别人」—— 公告板间歇限流时，
+ * 手里的快照仍然有效，只是要标明它是几分钟前的。
+ */
+watch(
+  () => [sangha.online, sangha.wishes, sangha.status, sangha.items.length],
+  () => {
+    if (!sangha.items.length) return
+    if (sangha.status === 'live') practice.setOnline(sangha.online)
+    practice.applyRemote(sangha.wishes)
+  }
+)
+
 if (import.meta.env.DEV) {
   window.__cyberPractice = practice
   window.__cyberLedger = ledger
+  window.__cyberSangha = sangha
+  window.__addMerit = addBalance
 }
 
 /** 冷却 / 限次 / 额度用尽时，把原因讲明白；3D 动画照播，只是不计功德 */
@@ -336,7 +399,10 @@ onMounted(() => {
     practice.applyBeacon(cached)
     pushLog('本机信标缓存已载入 · 正在联网核对当日公开随机值')
   }
-  ledger.init()
+  ledger.init().then(() => {
+    // 有了法号才能签名心跳，否则公告板上的「我」是个匿名影子
+    sangha.start()
+  })
   refreshBeacon()
   pushLog('共修协议就绪 · 第 1 炷香待燃')
   pushLog('WebGL 场景加载中...')
@@ -375,6 +441,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('pagehide', onPageHide)
   document.removeEventListener('visibilitychange', onVisibility)
+  sangha.stop()
   engine?.dispose()
 })
 </script>
@@ -419,13 +486,15 @@ onBeforeUnmount(() => {
       @toggle="practice.toggle()"
     />
 
-    <SanghaPanel v-if="started" :p="practice" :l="ledger" />
+    <SanghaPanel v-if="started" :p="practice" :l="ledger" :s="sangha" />
     <Joystick v-if="started" @move="onJoy" />
 
     <StartScreen
       v-if="!started && !booting"
       :merit="merit"
       :best-combo="bestCombo"
+      :online="sangha.online"
+      :live="sangha.status === 'live'"
       @enter="enter"
       @reset="resetAll"
     />

@@ -6,7 +6,8 @@ import SealPanel from './SealPanel.vue'
 
 const props = defineProps({
   p: { type: Object, required: true },
-  l: { type: Object, required: true }
+  l: { type: Object, required: true },
+  s: { type: Object, default: null }
 })
 // 窄屏默认收起心愿板，给节奏台和 3D 场景让出空间；桌面端 CSS 忽略此状态
 const collapsed = ref(true)
@@ -41,6 +42,22 @@ const miniText = computed(() => narrow.value
   ? `灯油 ${props.p.lampPct.toFixed(0)}% · ${freeCount.value} 愿`
   : `灯油 ${props.p.lampPct.toFixed(0)}% · 开光 ${props.p.openings} 次 · ${freeCount.value} 愿可共诵`)
 const draftNeed = computed(() => props.p.needFor(clampBounty(props.p.wishBounty)))
+
+/** 共修网络的真实状态：连上了才有「同修」，连不上就只有你自己 */
+const live = computed(() => !!props.s?.live)
+const soulList = computed(() => (props.s?.souls || []).slice(0, 6))
+const boardStat = computed(() => {
+  if (!live.value) return props.s?.statusText || '离线演示'
+  const real = (props.p.wishes || []).filter((w) => (w.remote || w.mine) && !w.done).length
+  return narrow.value
+    ? `${real} 条真愿 · ${props.p.online} 人在场`
+    : `公告板 ${real} 条真愿 · 在线 ${props.p.online} 人`
+})
+/** 窄屏只留两个名字，多了会跟状态文字抢位置 */
+const soulsLine = computed(() => {
+  const names = soulList.value.map((x) => x.name)
+  return narrow.value ? names.slice(0, 2).join(' · ') : names.join(' · ')
+})
 
 function setBounty(e) {
   props.p.wishBounty = clampBounty(e.target.value)
@@ -79,13 +96,17 @@ function wishState(w) {
     </div>
 
     <div class="sangha-body">
-      <div class="demo-tag">DEMO · 数值本地模拟，未上链</div>
+      <div class="live-strip" :class="{ on: live }">
+        <span class="live-dot"></span>
+        <span class="live-text">{{ boardStat }}</span>
+        <span class="live-souls">{{ soulsLine }}</span>
+      </div>
 
       <!-- 长明灯已移到右上角常驻卡片：这里不再重复占高度，窄屏折叠也不会把它藏掉 -->
 
       <div class="wish-head">
         <span class="label-mono">万佛墙 · 众人共诵</span>
-        <span class="wish-sub">不抢单 · 悬赏按击数分</span>
+        <span class="wish-sub">{{ live ? '同修挂的真愿 · 悬赏按击数分' : '演示单 · 未接上公告板' }}</span>
       </div>
 
       <div class="wish-list">
@@ -102,14 +123,15 @@ function wishState(w) {
           <div class="wish-line sub">
             <span>
               {{ w.mine ? '你挂的' : w.owner }} · <b class="crowd-num">{{ crowd(w) }} 人共诵</b>
-              <em v-if="!w.done && w.kind !== 'temple'" class="wish-expire"> · 剩 {{ p.stickLimit - w.sticks }} 炷</em>
+              <em v-if="!w.done && w.kind !== 'temple' && !w.remote" class="wish-expire"> · 剩 {{ p.stickLimit - w.sticks }} 炷</em>
             </span>
             <span>{{ w.progress }}/{{ w.need }} 击</span>
           </div>
           <div v-if="!w.done" class="wish-line sub wish-contrib">
             <span class="contrib-names">{{ topNames(w) || '等第一位共修者' }}</span>
             <span :class="{ 'my-share': myHits(w) > 0 }">
-              {{ myHits(w) > 0 ? `你 ${myHits(w)} 击 · 预计 +${share(w)} $G` : '按击数分悬赏' }}
+              <template v-if="w.remote">{{ myHits(w) > 0 ? `你 ${myHits(w)} 击 · 等愿主还愿` : '接单后按击数记功' }}</template>
+              <template v-else>{{ myHits(w) > 0 ? `你 ${myHits(w)} 击 · 预计 +${share(w)} $G` : '按击数分悬赏' }}</template>
             </span>
           </div>
           <div class="wish-bar"><i :style="{ width: (w.progress / w.need * 100) + '%' }"></i></div>
@@ -120,7 +142,8 @@ function wishState(w) {
               @click="p.takeWish(w)"
             >{{ wishState(w).text }}</button>
             <button v-if="w.mine && !w.done" class="wish-mini clickable" @click="p.cancelWish(w)">撤回</button>
-            <button v-else-if="!w.done" class="wish-mini clickable" @click="p.boostWish(w)">+{{ p.boostCost }} 随喜</button>
+            <button v-else-if="!w.done && !w.remote" class="wish-mini clickable" @click="p.boostWish(w)">+{{ p.boostCost }} 随喜</button>
+            <span v-else-if="w.remote && !w.done" class="wish-remote">同修挂的</span>
           </div>
         </div>
       </div>
@@ -149,7 +172,9 @@ function wishState(w) {
         <span class="bounty-unit">$G</span>
         <span class="bounty-need">≈ {{ draftNeed }} 击</span>
       </div>
-      <div class="post-note">托管越高共诵越久 · 悬赏由所有共诵者按击数分走，不占你的每日额度</div>
+      <div class="post-note">{{ live
+        ? '挂上就广播到公共公告板，别的同修能看见并接单 · 托管功德仍扣在你本机'
+        : '托管越高共诵越久 · 悬赏由所有共诵者按击数分走，不占你的每日额度' }}</div>
 
       <div v-if="p.activeWish" class="active-note">
         正与 <b>{{ crowd(p.activeWish) }}</b> 人同诵「{{ p.activeWish.text }}」· 切换心愿不会丢掉已敲的击数

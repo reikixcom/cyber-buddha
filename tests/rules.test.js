@@ -251,5 +251,7 @@ test('寺规文本与实际常量保持一致，免责声明永远在最后', ()
   assert.match(all, /六十四拍/)
   assert.match(all, /每日 600/)
   assert.match(all, new RegExp(`${WISH_STICK_LIMIT} 炷|六炷`))
-  assert.match(TEMPLE_RULES.at(-1), /本地模拟/)
+  // 接入共修网络后不再是「全部本地模拟」，但免责与边界必须仍在最后一条
+  assert.match(TEMPLE_RULES.at(-1), /未上链/)
+  assert.match(TEMPLE_RULES.at(-1), /不承诺任何收益/)
 })
