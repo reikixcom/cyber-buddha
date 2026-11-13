@@ -4,7 +4,10 @@ import { TEMPLE_RULES } from '../temple/rhythm.js'
 import { clampBounty } from '../temple/economy.js'
 import SealPanel from './SealPanel.vue'
 
-const props = defineProps({ p: { type: Object, required: true } })
+const props = defineProps({
+  p: { type: Object, required: true },
+  l: { type: Object, required: true }
+})
 // 窄屏默认收起心愿板，给节奏台和 3D 场景让出空间；桌面端 CSS 忽略此状态
 const collapsed = ref(true)
 // 窄屏把常住愿交给底部节奏条展示，列表直接露出可「加入共诵」的心愿
@@ -175,5 +178,5 @@ function wishState(w) {
     </div>
   </Transition>
 
-  <SealPanel :p="p" />
+  <SealPanel :p="p" :l="l" />
 </template>

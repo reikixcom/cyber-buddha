@@ -7,6 +7,7 @@ import SanghaPanel from './components/SanghaPanel.vue'
 import Joystick from './components/Joystick.vue'
 import { TempleEngine } from './temple/TempleEngine.js'
 import { usePractice } from './composables/usePractice.js'
+import { useLedger } from './composables/useLedger.js'
 import {
   RITUALS, DAILY_CAP, freshDaily, normalizeDaily, dayKey,
   ritualCheck, applyRitual, emitCredit
@@ -153,11 +154,15 @@ function addBalance(n, kind = 'transfer') {
   return credited
 }
 
+/** 功德票账本：出印自动认领、可转让、可拉公共流水审计。先于 practice 创建，供 onSeal 回调使用 */
+const ledger = useLedger({ merit, addBalance, pushLog, addToast })
+
 const practice = usePractice({
   merit,
   addBalance,
   pushLog,
   addToast,
+  onSeal: (seal) => ledger.claim(seal.text),
   onKnockVisual: (grade) => {
     engine?.knock(grade)
     // 触屏上给 PERFECT 一点极轻的触觉反馈；不支持的浏览器自动忽略
@@ -172,7 +177,10 @@ const practice = usePractice({
 
 getPracticeSnapshot = () => snapshotPractice(practice)
 
-if (import.meta.env.DEV) window.__cyberPractice = practice
+if (import.meta.env.DEV) {
+  window.__cyberPractice = practice
+  window.__cyberLedger = ledger
+}
 
 /** 冷却 / 限次 / 额度用尽时，把原因讲明白；3D 动画照播，只是不计功德 */
 function notifyBlock(type, check) {
@@ -268,6 +276,7 @@ function resetAll() {
   taskDone.value = { incense: false, bow: false, fish: false, bell: false }
   daily.value = freshDaily()
   practice.resetMarket()
+  ledger.reset()
   save()
   pushLog('功德账本已清零 · 心愿与长明灯一并归零', true)
   addToast('账本已清零', '放下执念，重新开始')
@@ -327,6 +336,7 @@ onMounted(() => {
     practice.applyBeacon(cached)
     pushLog('本机信标缓存已载入 · 正在联网核对当日公开随机值')
   }
+  ledger.init()
   refreshBeacon()
   pushLog('共修协议就绪 · 第 1 炷香待燃')
   pushLog('WebGL 场景加载中...')
@@ -409,7 +419,7 @@ onBeforeUnmount(() => {
       @toggle="practice.toggle()"
     />
 
-    <SanghaPanel v-if="started" :p="practice" />
+    <SanghaPanel v-if="started" :p="practice" :l="ledger" />
     <Joystick v-if="started" @move="onJoy" />
 
     <StartScreen

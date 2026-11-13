@@ -1341,6 +1341,33 @@ button { font-family: inherit; cursor: pointer; }
 .seal-src.public { color: #7fe6b4; border-color: rgba(61, 255, 168, 0.5); background: rgba(61, 255, 168, 0.07); }
 .seal-src.local, .seal-src.legacy { color: var(--gold); border-color: rgba(255, 204, 102, 0.45); background: rgba(255, 204, 102, 0.06); }
 
+/* ---------- 功德票 ---------- */
+.seal-tabs { flex-wrap: wrap; }
+.note-chip {
+  font-family: var(--font-mono); font-size: 8px; padding: 1px 5px;
+  letter-spacing: 0.06em; border: 1px solid;
+}
+.note-chip.bad {
+  color: #ff7ba8; border-color: rgba(255, 45, 149, 0.55);
+  background: rgba(255, 45, 149, 0.08);
+}
+.note-charge {
+  margin-top: 8px; padding: 8px;
+  border: 1px dashed rgba(0, 240, 255, 0.25);
+  background: rgba(0, 240, 255, 0.03);
+}
+.note-charge-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.note-input {
+  flex: 1 1 140px; min-width: 0; padding: 7px 9px;
+  background: rgba(4, 12, 20, 0.7); border: 1px solid rgba(0, 240, 255, 0.28);
+  color: #eafcff; font-size: 11px; font-family: inherit;
+}
+.note-input:focus { outline: none; border-color: var(--cyan); }
+.note-input::placeholder { color: #55738a; }
+.note-flash { margin-top: 9px; font-size: 10px; line-height: 1.7; word-break: break-word; }
+.note-conflict { grid-template-columns: 1fr; gap: 3px; }
+.note-warn { color: var(--gold); font-weight: 500; }
+
 @media (max-width: 860px) {
   .seal-card { width: calc(100vw - 18px); max-height: 86vh; padding: 14px 13px 12px; }
   .seal-intro { font-size: 10px; line-height: 1.7; }

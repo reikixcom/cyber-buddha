@@ -90,7 +90,7 @@ function makeMarket(temple) {
  * 共修原型：节奏敲木鱼 + 长明灯 + 多人共诵悬赏 + 常住共修愿。
  * 所有数值本地模拟，不接链、不接钱包、不接服务端。
  */
-export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisual, onCelebrate, onPersist }) {
+export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisual, onCelebrate, onPersist, onSeal }) {
   const beacon = ref(fallbackBeacon())
   let daySeed = beacon.value.seed
   /** 本炷快照：信标中途切换不影响正在敲的这一炷，下一炷才用新种子 */
@@ -337,6 +337,8 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     }
     if (firstSeal) pushLog('首张禅印已生成 · 心愿板「禅印」可复制给他人复算', true)
     persist()
+    // 出印即认领：异步签名不成也不影响本炷结算，账本那边会如实标「未认领」
+    Promise.resolve(onSeal?.(seal)).catch(() => {})
     const got = addBalance(r.reward, 'emit')
     if (got > 0) {
       pushLog(`第 ${round.value} 炷结算 · 合拍 ${Math.round(r.accuracy * 100)}% · +${got} $GONGDE`, got >= 30)

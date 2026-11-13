@@ -141,7 +141,30 @@ function b64decode(s) {
     bits += 6
     if (bits >= 8) { bits -= 8; bytes.push((acc >> bits) & 255) }
   }
-  return String.fromCharCode(...bytes)
+  // 必须按 UTF-8 还原：回执本身是纯 ASCII，但流水里的「用途」可能是中文，
+  // 按字节直转会得到乱码，签名规范串随之对不上。
+  let out = ''
+  for (let i = 0; i < bytes.length;) {
+    const b = bytes[i]
+    if (b < 0x80) { out += String.fromCharCode(b); i += 1 }
+    else if (b < 0xe0) {
+      if (i + 1 >= bytes.length) break
+      out += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i + 1] & 0x3f))
+      i += 2
+    } else if (b < 0xf0) {
+      if (i + 2 >= bytes.length) break
+      out += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f))
+      i += 3
+    } else {
+      if (i + 3 >= bytes.length) break
+      const cp = ((b & 0x07) << 18) | ((bytes[i + 1] & 0x3f) << 12) |
+        ((bytes[i + 2] & 0x3f) << 6) | (bytes[i + 3] & 0x3f)
+      const v = cp - 0x10000
+      out += String.fromCharCode(0xd800 + (v >> 10), 0xdc00 + (v & 0x3ff))
+      i += 4
+    }
+  }
+  return out
 }
 
 /** 带校验码的打包 / 拆包；hash 覆盖规范串本身，改一个字符就会露馅 */
@@ -336,3 +359,9 @@ export function unpackLedger(text) {
     return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : null
   } catch { return null }
 }
+
+/**
+ * 供功德票流水复用同一套编码：带校验码的 pack/unpack + base64url。
+ * 只导出工具，不改回执与验签的任何行为。
+ */
+export { pack as packRecord, unpack as unpackRecord, b64encode as b64urlEncode, b64decode as b64urlDecode }

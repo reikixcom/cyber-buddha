@@ -1,13 +1,17 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { verifySeal, verifyChain, packLedger, unpackLedger } from '../temple/seal.js'
+import { nameOf } from '../temple/ledger.js'
 import { snapshotPractice, sanitizePracticeSave, STORE_KEY } from '../temple/save.js'
 import {
   fetchDayBeacon, checkSealBeacon, beaconPublicUrl,
   utcDayKey, cacheBeacon, BEACON_RELAYS
 } from '../temple/beacon.js'
 
-const props = defineProps({ p: { type: Object, required: true } })
+const props = defineProps({
+  p: { type: Object, required: true },
+  l: { type: Object, required: true }
+})
 
 const tab = ref('seals')
 const note = ref('')
@@ -20,6 +24,112 @@ const importText = ref('')
 const ledgerPreview = ref(null)
 const ledgerError = ref('')
 const armed = ref(false)
+
+/* ---------------- 功德票 ---------------- */
+const chargeFor = ref('')
+const chargeTo = ref('')
+const chargeNote = ref('')
+const flowNote = ref('')
+const flowExport = ref('')
+const flowInput = ref('')
+const idText = ref('')
+const idBusy = ref(false)
+
+const myNotes = computed(() => props.l.myTickets)
+const incomingNotes = computed(() => props.l.receivable)
+const conflicts = computed(() => props.l.audit?.conflicts || [])
+const conflictTickets = computed(() => new Set(conflicts.value.map((c) => c.ticket)))
+const soldAll = computed(() => props.l.records.some((t) => String(t).startsWith('CTX1.')))
+const KIND_NAME = {
+  'double-spend': '双花',
+  'claim-conflict': '重复认领',
+  'not-holder': '越权转让',
+  orphan: '孤链',
+  'broken-link': '链断裂'
+}
+const kindName = (k) => KIND_NAME[k] || k
+const holderName = (pub) => nameOf(pub)
+
+function openCharge(short) {
+  chargeFor.value = chargeFor.value === short ? '' : short
+  chargeTo.value = ''
+  chargeNote.value = ''
+  flowNote.value = ''
+}
+
+async function doCharge() {
+  if (idBusy.value) return
+  idBusy.value = true
+  try {
+    const r = await props.l.transfer(chargeFor.value, chargeTo.value, chargeNote.value)
+    if (!r.ok) { flowNote.value = r.reason; return }
+    flowNote.value = r.published
+      ? '已转出并广播到公共公告板'
+      : `已转出，但没广播：${r.publishReason}（流水在本机，可整包导出给对方）`
+    chargeFor.value = ''
+    chargeTo.value = ''
+    chargeNote.value = ''
+  } finally {
+    idBusy.value = false
+  }
+}
+
+async function doRedeem(short) {
+  if (idBusy.value) return
+  idBusy.value = true
+  try {
+    const r = await props.l.redeem(short)
+    flowNote.value = r.ok ? `凭票入账 +${r.amount} $G` : r.reason
+  } finally {
+    idBusy.value = false
+  }
+}
+
+async function doPull() {
+  if (idBusy.value) return
+  idBusy.value = true
+  try {
+    const r = await props.l.pull()
+    if (!r.ok) { flowNote.value = r.reason; return }
+    flowNote.value = `公共流水已同步 · 新增 ${r.added} 条${r.junk ? ` · 忽略 ${r.junk} 条无关消息` : ''}`
+  } finally {
+    idBusy.value = false
+  }
+}
+
+async function doImportFlow() {
+  if (idBusy.value) return
+  idBusy.value = true
+  try {
+    const r = await props.l.importFlow(flowInput.value)
+    flowNote.value = r.ok
+      ? (r.added ? `已导入 ${r.added} 条流水，重新审计完成` : `这些流水本来就有（共 ${r.total} 条），没有新增`)
+      : r.reason
+  } finally {
+    idBusy.value = false
+  }
+}
+
+function doExportFlow() {
+  flowExport.value = props.l.exportBundle()
+  flash('整本流水已打包 · 复制给对方就能对账')
+}
+
+function showBackup() {
+  idText.value = props.l.myBackup()
+  flowNote.value = '这串含私钥，别贴到群里；只在自己设备间搬运用'
+}
+
+async function restoreId() {
+  if (idBusy.value) return
+  idBusy.value = true
+  try {
+    const r = await props.l.restoreIdentity(idText.value)
+    flowNote.value = r.ok ? `法号已恢复 · ${r.name}` : r.reason
+  } finally {
+    idBusy.value = false
+  }
+}
 
 const seals = computed(() => props.p.seals
   .map((t) => verifySeal(t))
@@ -210,6 +320,7 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
         <div class="seal-tabs">
           <button class="seal-tab clickable" :class="{ on: tab === 'seals' }" @click="tab = 'seals'">本机回执 · {{ seals.length }}</button>
           <button class="seal-tab clickable" :class="{ on: tab === 'verify' }" @click="tab = 'verify'">验签</button>
+          <button class="seal-tab clickable" :class="{ on: tab === 'notes' }" @click="tab = 'notes'">功德票 · {{ myNotes.length }}</button>
           <button class="seal-tab clickable" :class="{ on: tab === 'ledger' }" @click="tab = 'ledger'">账本搬家</button>
         </div>
 
@@ -302,6 +413,131 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
           </div>
         </div>
 
+        <!-- 功德票 -->
+        <div v-if="tab === 'notes'" class="seal-body">
+          <div class="seal-beacon ok">
+            <span class="beacon-dot"></span>
+            <div class="beacon-main">
+              <b>我的法号 · {{ l.identity?.name || '正在本机生成…' }}</b>
+              <span>私钥只在这台设备上，转账靠它签名。换设备要用下面那串身份备份，别贴到群里。</span>
+            </div>
+            <button class="seal-ghost clickable" :disabled="!l.card" @click="copy(l.card, '收款码')">复制收款码</button>
+            <button class="seal-ghost clickable" :disabled="!l.ready" @click="showBackup">身份备份</button>
+          </div>
+
+          <div class="seal-section-title">
+            我的票 · {{ myNotes.length }} 张
+            <span class="seal-hint">一张禅印 = 一张票，票面额固定，只能整张转</span>
+          </div>
+          <div v-if="myNotes.length" class="seal-list">
+            <div v-for="t in myNotes" :key="t.short" class="seal-row">
+              <div class="seal-row-main">
+                <span class="seal-round">第 {{ t.round }} 炷</span>
+                <span class="seal-reward">+{{ t.reward }} $G</span>
+                <span class="seal-src" :class="t.source">{{ srcName(t.source) }}</span>
+                <span v-if="t.implicit" class="note-chip">未认领</span>
+                <span v-if="conflictTickets.has(t.short)" class="note-chip bad">有冲突</span>
+                <span class="seal-time">{{ fmtTime(t.claimedAt) }}</span>
+              </div>
+              <div class="seal-row-sub">
+                <span class="seal-short">{{ t.short }}</span>
+                <span class="seal-prev">{{ t.history.length > 1 ? `已流转 ${t.history.length - 1} 次` : '在手，未转过' }}</span>
+                <button class="seal-copy clickable" @click="openCharge(t.short)">{{ chargeFor === t.short ? '收起' : '转出这张' }}</button>
+              </div>
+              <div v-if="chargeFor === t.short" class="note-charge">
+                <textarea
+                  v-model="chargeTo" class="seal-textarea clickable" rows="2" data-role="charge-to"
+                  placeholder="粘贴对方的收款码（CTP1. 开头，对方在「功德票」里复制）"
+                ></textarea>
+                <div class="note-charge-row">
+                  <input v-model="chargeNote" class="note-input clickable" maxlength="18" placeholder="用途（可选，会公开）" />
+                  <button class="seal-primary clickable" :disabled="idBusy" @click="doCharge">
+                    签名转出 {{ t.reward }} $G
+                  </button>
+                </div>
+                <div class="seal-hint">转出会从你的余额扣掉票面额，并广播一条带签名的转让单</div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="seal-empty">
+            {{ soldAll ? '名下的票都转出去了。再敲一炷，新票会自动认领。' : '还没有票。敲完一炷香会自动认领 —— 认领之后，这张票就能转给别人。' }}
+          </div>
+
+          <template v-if="incomingNotes.length">
+            <div class="seal-section-title">待入账 · {{ incomingNotes.length }} 张</div>
+            <div class="seal-list">
+              <div v-for="t in incomingNotes" :key="t.short" class="seal-row">
+                <div class="seal-row-main">
+                  <span class="seal-round">第 {{ t.round }} 炷</span>
+                  <span class="seal-reward">+{{ t.reward }} $G</span>
+                  <span class="seal-pg">来自 {{ holderName(t.history[t.history.length - 1]?.from) }}</span>
+                </div>
+                <div class="seal-row-sub">
+                  <span class="seal-short">{{ t.short }}</span>
+                  <button class="seal-primary clickable" :disabled="idBusy" @click="doRedeem(t.short)">凭票入账</button>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div class="seal-section-title">公共流水 · 谁都能读，谁都能发</div>
+          <div class="seal-actions">
+            <button class="seal-ghost clickable" :disabled="idBusy" @click="doPull">
+              {{ idBusy && l.busyText ? l.busyText : '拉取最近 24 小时' }}
+            </button>
+            <span class="seal-hint">ntfy.sh 公开公告板 · 免账号 · 拉到本地逐条验签</span>
+          </div>
+          <div class="seal-detail">
+            <span>合并流水 <b>{{ l.records.length + l.incoming.length }}</b> 条</span>
+            <span>有效票 <b>{{ l.stats.own + l.stats.receivable }}</b> 张</span>
+            <span>冲突 <b>{{ conflicts.length }}</b> 处</span>
+            <span>丢弃 <b>{{ l.stats.rejected }}</b> 条</span>
+            <span v-if="l.lastPull">上次同步 <b>{{ l.lastPull }}</b></span>
+          </div>
+
+          <div v-if="conflicts.length" class="seal-result bad">
+            <div class="seal-result-title">✕ 对账发现 {{ conflicts.length }} 处问题</div>
+            <div v-for="c in conflicts.slice(0, 4)" :key="c.ticket + c.kind" class="seal-detail note-conflict">
+              <span>票 <b>{{ c.ticket.slice(0, 8) }}…</b> · {{ kindName(c.kind) }}</span>
+              <span>{{ c.detail }}</span>
+            </div>
+            <div class="seal-hint">同一张票被转给多个人，只有把两边的流水合到一起才看得出来 —— 这就是没有共识时要付的代价。</div>
+          </div>
+          <div v-if="flowNote" class="seal-flash note-flash">{{ flowNote }}</div>
+
+          <div class="seal-section-title">整本流水 · 换设备，或给对方对账</div>
+          <div class="seal-actions">
+            <button class="seal-primary clickable" @click="doExportFlow">生成整包</button>
+            <button v-if="flowExport" class="seal-ghost clickable" @click="copy(flowExport, '流水包')">复制流水包</button>
+          </div>
+          <textarea
+            v-if="flowExport" class="seal-textarea clickable mono" rows="3" readonly
+            :value="flowExport" @focus="$event.target.select()"
+          ></textarea>
+          <textarea
+            v-model="flowInput" class="seal-textarea clickable" rows="3" data-role="flow-input"
+            placeholder="粘贴对方的流水包（CTB1.）或几行 CTK1 / CTX1 流水"
+          ></textarea>
+          <div class="seal-actions">
+            <button class="seal-ghost clickable" :disabled="idBusy" @click="doImportFlow">导入并重新审计</button>
+            <span class="seal-hint">导入只合并流水，不会动你的余额</span>
+          </div>
+
+          <div v-if="idText" class="seal-section-title">身份备份 · 含私钥</div>
+          <textarea v-if="idText" v-model="idText" class="seal-textarea clickable mono" rows="3"></textarea>
+          <div v-if="idText" class="seal-actions">
+            <button class="seal-ghost clickable" @click="copy(idText, '身份备份')">复制备份</button>
+            <button class="seal-ghost clickable" :disabled="idBusy" @click="restoreId">用这串恢复法号</button>
+          </div>
+
+          <div class="seal-note">
+            一张禅印就是一张票：票面额由寺规算出来，转手靠你的私钥签名。别人把流水贴进来，
+            能验证票真不真、面额对不对、签名是不是本人；同一张票转给两个人，两边的流水一合并就会报双花。
+            做不到的也讲清楚 —— 没有共识，只能事后发现、不能事前阻止；公告板的消息只留约 12 小时，
+            长期的账本要靠大家互相导出镜像。
+          </div>
+        </div>
+
         <!-- 账本 -->
         <div v-if="tab === 'ledger'" class="seal-body">
           <div class="seal-section-title">导出 · 换设备续修</div>
@@ -340,6 +576,9 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
           <div class="seal-note">
             校验码只防粘贴、转发、存档时把文本弄坏，不防自己改存档 —— 原型没有服务端，
             账本本来就存在你自己的浏览器里。导入会覆盖本机现有余额与心愿，先导出备份再操作。
+            <br />
+            <b class="note-warn">功德票要另外搬：</b>「功德票 → 整本流水」的流水包 + 「身份备份」两样一起带走，
+            才算把票也搬过去；只搬这份账本，票的归属会跟着旧法号留在旧设备上。
           </div>
         </div>
 
