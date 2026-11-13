@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import StartScreen from './components/StartScreen.vue'
 import HudOverlay from './components/HudOverlay.vue'
 import ToastStack from './components/ToastStack.vue'
+import ShareCard from './components/ShareCard.vue'
 import PracticeDeck from './components/PracticeDeck.vue'
 import SanghaPanel from './components/SanghaPanel.vue'
 import Joystick from './components/Joystick.vue'
@@ -50,6 +51,8 @@ const bootError = ref('')
 const merit = ref(0)
 const bestCombo = ref(0)
 const knockCount = ref(0)
+/** 节奏共修里的最高连击（与 3D 叩击的 bestCombo 分开记，展示时取两者最大） */
+const chainBest = ref(0)
 const combo = ref(0)
 const muted = ref(false)
 const quality = ref('high')
@@ -117,6 +120,7 @@ function save() {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       merit: merit.value,
       bestCombo: bestCombo.value,
+      chainBest: chainBest.value,
       knockCount: knockCount.value,
       taskDone: taskDone.value,
       daily: daily.value,
@@ -135,6 +139,7 @@ function load() {
     const d = JSON.parse(raw)
     merit.value = Number(d.merit) || 0
     bestCombo.value = Number(d.bestCombo) || 0
+    chainBest.value = Number(d.chainBest) || 0
     knockCount.value = Number(d.knockCount) || 0
     taskDone.value = { ...taskDone.value, ...(d.taskDone || {}) }
     daily.value = normalizeDaily(d.daily)
@@ -171,6 +176,11 @@ const practice = usePractice({
   onSeal: (seal) => ledger.claim(seal.text),
   onKnockVisual: (grade) => {
     engine?.knock(grade)
+    // 节奏敲击也算「总敲击」：分享卡上的数字不能只统计 3D 里的叩击
+    if (grade !== 'wild') {
+      knockCount.value += 1
+      if (practice.chain > chainBest.value) chainBest.value = practice.chain
+    }
     // 触屏上给 PERFECT 一点极轻的触觉反馈；不支持的浏览器自动忽略
     if (grade === 'perfect' && typeof navigator.vibrate === 'function') navigator.vibrate(9)
   },
@@ -335,37 +345,12 @@ function resetView() { engine?.resetView() }
 function onJoy(v) { engine?.setJoystick(v.x, v.y) }
 
 /**
- * 分享：手机上走系统分享面板，桌面上退回复制链接。
+ * 分享：给一张能直接发出去的战绩图（含法号与禅印短码，别人可复算）。
  * 不做「邀请码 / 拉新奖励」—— 那是项目方的运营手段，这里没有项目方。
  */
-async function shareTemple() {
-  const url = (typeof location !== 'undefined' ? location.origin : 'https://cyberbuddha.ai') + '/'
-  const text = `赛博禅寺 · 敲木鱼就是出块。共修一炷香，代诵万佛愿。`
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: '赛博禅寺 · CYBER TEMPLE', text, url })
-      return
-    }
-  } catch (err) {
-    if (err?.name === 'AbortError') return
-  }
-  try {
-    await navigator.clipboard.writeText(url)
-    addToast('链接已复制', '发给同修，一起共修一炷香', 'system')
-    return
-  } catch { /* 非安全上下文或没授权，落回手选复制 */ }
-  try {
-    const el = document.createElement('textarea')
-    el.value = url
-    el.setAttribute('readonly', '')
-    el.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
-    document.body.appendChild(el)
-    el.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(el)
-    if (ok) { addToast('链接已复制', '发给同修，一起共修一炷香', 'system'); return }
-  } catch { /* 还是不行就明说 */ }
-  addToast('请手动复制链接', url, 'system')
+const shareOpen = ref(false)
+function shareTemple() {
+  shareOpen.value = true
 }
 
 function resetAll() {
@@ -539,6 +524,19 @@ onBeforeUnmount(() => {
 
     <!-- 提示层独立于 HUD：首屏点「分享」也要有反馈 -->
     <ToastStack :toasts="toasts" />
+
+    <ShareCard
+      v-if="shareOpen"
+      :merit="merit"
+      :knock-count="knockCount"
+      :best-combo="Math.max(bestCombo, chainBest)"
+      :seal-count="practice.seals.length"
+      :last-seal="practice.lastSeal"
+      :seals="practice.seals"
+      :identity="ledger.identity"
+      :online="sangha.online"
+      @close="shareOpen = false"
+    />
 
     <Transition name="fade">
       <div v-if="booting" class="boot">
