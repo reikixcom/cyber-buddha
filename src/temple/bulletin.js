@@ -67,6 +67,7 @@ function markOk(host, kind) {
   h.failUntil = 0
   h.lastOk = Date.now()
   h.lastStatus = 200
+  if (kind === 'write') persist()
 }
 
 function markBad(host, kind, status) {
@@ -77,6 +78,7 @@ function markBad(host, kind, status) {
   const base = Number(status) === 429 ? 30000 : 12000
   const wait = Math.min(base * 2 ** Math.min(4, h.fails - 1), 300000)
   h.failUntil = Date.now() + wait
+  if (kind === 'write') persist()
 }
 
 /** 给 UI 用：一次看清每家读写两条线各自的状态 */
@@ -93,9 +95,59 @@ export function relayHealth() {
   })
 }
 
+/* ------------------------------------------------------------------ *
+ * 把「写冷却」记到 localStorage：免费实例的每日配额可能几小时才恢复，
+ * 刷新一次就忘掉的话，每次重新打开都得先白撞一次 429。
+ * 只存写到期的时刻，不存任何用户数据；读侧不持久化（读缓存很快自愈）。
+ * ------------------------------------------------------------------ */
+const RELAY_STORE = 'cyber-bulletin-health-v1'
+let hydrated = false
+
+function store() {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null
+  } catch { return null }
+}
+
+function hydrate() {
+  if (hydrated) return
+  hydrated = true
+  const ls = store()
+  if (!ls) return
+  try {
+    const obj = JSON.parse(ls.getItem(RELAY_STORE) || '{}')
+    const now = Date.now()
+    for (const [host, v] of Object.entries(obj || {})) {
+      const until = Number(v?.writeUntil) || 0
+      if (until > now) {
+        const h = slot(host, 'write')
+        h.failUntil = until
+        h.fails = Math.max(1, Number(v?.fails) || 1)
+        h.lastStatus = 429
+      }
+    }
+  } catch { /* 坏数据就当没有 */ }
+}
+
+function persist() {
+  const ls = store()
+  if (!ls) return
+  try {
+    const now = Date.now()
+    const out = {}
+    for (const [host, h] of health.write) {
+      if (h.failUntil > now) out[host] = { writeUntil: h.failUntil, fails: h.fails }
+    }
+    if (Object.keys(out).length) ls.setItem(RELAY_STORE, JSON.stringify(out))
+    else ls.removeItem(RELAY_STORE)
+  } catch { /* 隐私模式写不进去就算了 */ }
+}
+
 export function resetRelayHealth() {
   health.read.clear()
   health.write.clear()
+  // 不主动删本地记录：这里的语义是「模拟一次新页面加载」，冷却本来就该被继承
+  hydrated = false
 }
 
 /** 健康的排前面；全在冷却时按「最早解封」排，避免一次撞三门 */
@@ -150,6 +202,7 @@ export async function publishRecord(text, opts = {}) {
     relays = RELAYS,
     timeoutMs = 9000
   } = opts
+  hydrate()
   const body = typeof text === 'string' ? text.trim() : ''
   if (!body) return { ok: false, reason: '没有可发布的内容' }
   if (body.length > 3800) return { ok: false, reason: '这条消息太长，公告板单条上限 4KB' }
@@ -194,6 +247,7 @@ export async function pullRecords(opts = {}) {
     timeoutMs = 9000
   } = opts
   if (typeof fetchImpl !== 'function') return { ok: false, reason: '当前环境不支持网络请求', messages: [] }
+  hydrate()
 
   const one = async (base, host) => {
     const t = timed(timeoutMs)

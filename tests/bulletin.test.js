@@ -147,3 +147,39 @@ test('写被限流后，读成功不能顺手清掉写的退避', async () => {
   assert.ok(afterRead.writeUntil > Date.now(), '读成功不该清掉写的退避 —— 否则心跳会反复撞 429')
   assert.equal(afterRead.readUntil, 0)
 })
+
+test('写冷却会跨「刷新」保留：别让用户每次开页都白撞一次 429', async () => {
+  const HOSTS2 = RELAYS.map((r) => r.host)
+  const mem = new Map()
+  globalThis.localStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => mem.set(k, String(v)),
+    removeItem: (k) => mem.delete(k)
+  }
+  try {
+    resetRelayHealth()
+    // 第一家里「写」被限流、「读」正常（真实场景：当日消息配额用完）
+    const plan = {
+      [HOSTS2[0]]: ({ init }) => (init.method === 'POST' ? 429 : 'ok'),
+      [HOSTS2[1]]: 'ok'
+    }
+    const net = fakeNet(plan)
+    const first = await publishRecord('CTH1.demo', { fetchImpl: net.fetchImpl })
+    assert.equal(first.ok, true, '应当自动换到第二家')
+    assert.equal(net.calls[0].host, HOSTS2[0], '第一次会先撞到配额用完的那家，这是必然代价')
+    assert.equal(net.calls[1].host, HOSTS2[1])
+
+    const stored = JSON.parse(mem.get('cyber-bulletin-health-v1') || '{}')
+    assert.ok(stored[HOSTS2[0]]?.writeUntil > Date.now(), '冷却必须落到本地')
+
+    // 模拟刷新：内存表清空，但本地记录还在
+    resetRelayHealth()
+    const net2 = fakeNet({ [HOSTS2[1]]: 'ok' })
+    const r = await publishRecord('CTH1.demo2', { fetchImpl: net2.fetchImpl })
+    assert.equal(r.ok, true)
+    assert.equal(net2.calls[0].host, HOSTS2[1], '应当直接跳到没被限流的那家，不再先撞一次')
+  } finally {
+    delete globalThis.localStorage
+    resetRelayHealth()
+  }
+})
