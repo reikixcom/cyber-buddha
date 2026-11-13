@@ -11,9 +11,8 @@ import {
   RITUALS, DAILY_CAP, freshDaily, normalizeDaily, dayKey,
   ritualCheck, applyRitual, emitCredit
 } from './temple/economy.js'
-import { snapshotPractice } from './temple/save.js'
+import { snapshotPractice, STORE_KEY } from './temple/save.js'
 
-const STORE_KEY = 'cyber-temple-save-v2'
 const RANKS = [
   { min: 0, name: '初入山门' },
   { min: 30, name: '电子沙弥' },

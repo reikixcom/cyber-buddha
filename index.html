@@ -18,9 +18,51 @@
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>赛博禅寺 · CYBER TEMPLE</title>
+    <!--
+      首屏静态占位：JS bundle（含 Three.js）下载并执行前，页面不该是白的。
+      Vue 挂载 #app 时会自动清掉这段内容，之后由 App.vue 的 boot 遮罩接管。
+      样式内联，不依赖任何外部资源，CSP 的 'unsafe-inline' 已放行。
+    -->
+    <style>
+      html, body { margin: 0; background: #05030f; color: #d9f4ff; }
+      .preboot {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background: radial-gradient(circle at 50% 42%, #10143a 0%, #05030f 68%);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .preboot-inner { text-align: center; padding: 24px; }
+      .preboot-mark {
+        width: 66px; height: 66px; margin: 0 auto 20px; display: grid; place-items: center;
+        border: 1px solid rgba(0, 240, 255, 0.6); font-size: 30px; color: #00f0ff;
+        box-shadow: 0 0 30px rgba(0, 240, 255, 0.22), inset 0 0 20px rgba(0, 240, 255, 0.08);
+      }
+      .preboot-title {
+        font-size: 34px; letter-spacing: 0.38em; text-indent: 0.38em; color: #eafcff;
+        text-shadow: 0 0 18px rgba(0, 240, 255, 0.6);
+      }
+      .preboot-sub { margin-top: 9px; font-size: 10px; letter-spacing: 0.26em; color: #6e8ba3; }
+      .preboot-bar { width: 220px; height: 3px; margin: 26px auto 13px; background: rgba(0, 240, 255, 0.14); overflow: hidden; }
+      .preboot-bar i {
+        display: block; width: 38%; height: 100%; background: #00f0ff; box-shadow: 0 0 12px #00f0ff;
+        animation: prebootSlide 1.25s ease-in-out infinite;
+      }
+      @keyframes prebootSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(360%); } }
+      .preboot-text { font-size: 10px; letter-spacing: 0.14em; color: #7e9cad; }
+      @media (prefers-reduced-motion: reduce) { .preboot-bar i { animation: none; width: 100%; } }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="preboot" aria-hidden="true">
+        <div class="preboot-inner">
+          <div class="preboot-mark">禅</div>
+          <div class="preboot-title">赛博禅寺</div>
+          <div class="preboot-sub">CYBER TEMPLE // NODE 001</div>
+          <div class="preboot-bar"><i></i></div>
+          <div class="preboot-text">正在构建赛博道场 · LOADING SANCTUARY</div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

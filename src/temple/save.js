@@ -10,7 +10,12 @@
  * 坏档直接返回 null 让上层用默认市场，绝不让脏数据把场景搞崩。
  */
 
-export const SAVE_VERSION = 2
+import { verifySeal } from './seal.js'
+
+/** v3 起附带禅印回执链；v2 老档照样能读，只是没有历史回执 */
+export const SAVE_VERSION = 3
+export const STORE_KEY = 'cyber-temple-save-v2'
+export const SEAL_KEEP = 24
 
 const clampNum = (v, fallback, min, max) => {
   const n = Number(v)
@@ -69,6 +74,13 @@ export function sanitizeWish(raw) {
   }
 }
 
+/** 只保留自身能复算通过的回执，坏文本不写进存档 */
+function sanitizeSeals(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw.slice(-SEAL_KEEP)
+    .filter((t) => typeof t === 'string' && t.length < 512 && verifySeal(t).ok)
+}
+
 /** 从 reactive 状态取快照；只取白名单字段 */
 export function snapshotPractice(p) {
   if (!p || !Array.isArray(p.wishes)) return null
@@ -78,8 +90,11 @@ export function snapshotPractice(p) {
     openings: clampNum(p.openings, 0, 0, 9999),
     templePool: clampNum(p.templePool, 30, 0, 99999),
     templeCycles: clampNum(p.templeCycles, 1, 1, 9999),
+    // 炷号也要存：否则刷新后从 1 重新数，同一天会出现多张「第 1 炷」共用同一个节拍种子
+    round: clampNum(p.round, 0, 0, 1e7),
     activeWishId: clampNum(p.activeWishId, 0, 0, 1e9),
-    wishes: p.wishes.slice(0, MAX_WISHES).map(sanitizeWish).filter(Boolean)
+    wishes: p.wishes.slice(0, MAX_WISHES).map(sanitizeWish).filter(Boolean),
+    seals: sanitizeSeals(p.seals)
   }
 }
 
@@ -88,7 +103,7 @@ export function snapshotPractice(p) {
  * 上层保持刚初始化的默认市场，玩家最多损失进度，不会进到坏状态。
  */
 export function sanitizePracticeSave(raw) {
-  if (!raw || typeof raw !== 'object' || raw.v !== SAVE_VERSION) return null
+  if (!raw || typeof raw !== 'object' || (raw.v !== SAVE_VERSION && raw.v !== 2)) return null
   const wishes = Array.isArray(raw.wishes)
     ? raw.wishes.slice(0, MAX_WISHES).map(sanitizeWish).filter(Boolean)
     : []
@@ -103,13 +118,17 @@ export function sanitizePracticeSave(raw) {
   }
   const activeWishId = clean.some((w) => w.id === Number(raw.activeWishId) && !w.done)
     ? Number(raw.activeWishId) : temples[0].id
+  const cleanSeals = sanitizeSeals(raw.seals)
   return {
     v: SAVE_VERSION,
     lamp: clampNum(raw.lamp, 55, 0, 100),
     openings: clampNum(raw.openings, 0, 0, 9999),
     templePool: clampNum(raw.templePool, 30, 0, 99999),
     templeCycles: clampNum(raw.templeCycles, 1, 1, 9999),
+    // v2 老档没有 round：用已有回执张数接着数，至少不会再撞回第 1 炷
+    round: clampNum(raw.v === 2 ? undefined : raw.round, cleanSeals.length, 0, 1e7),
     activeWishId,
-    wishes: clean
+    wishes: clean,
+    seals: cleanSeals
   }
 }

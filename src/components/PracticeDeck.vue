@@ -71,6 +71,11 @@ function tapToggle(e) {
             <span class="mobile-inline">共修一炷香</span>
           </span>
           <span class="deck-round">第 {{ p.round }} 炷</span>
+          <button
+            v-if="p.lastSeal" class="seal-chip clickable"
+            title="查看与复制禅印回执 · 任何人可按寺规复算"
+            @click="p.showSeals = true"
+          >禅印 {{ p.lastSeal.short.slice(0, 8) }}</button>
         </div>
         <div class="deck-meta">
           <span class="meta-extra"><span class="live-dot" :class="{ off: paused }"></span>{{ p.online.toLocaleString() }} 人共修 <span class="deck-sep">/</span></span>
@@ -111,7 +116,12 @@ function tapToggle(e) {
       </div>
 
       <div v-if="p.settlement && !paused" class="settle">
-        <div class="settle-title">第 {{ p.settlement.round }} 炷 · 结算</div>
+        <div class="settle-title">
+          第 {{ p.settlement.round }} 炷 · 结算
+          <button v-if="p.settlement.sealShort" class="settle-seal clickable" @click="p.showSeals = true">
+            禅印 <b>{{ p.settlement.sealShort }}</b> · 复制 / 验签 →
+          </button>
+        </div>
         <div class="settle-row">
           <span>合拍率 <b>{{ Math.round(p.settlement.accuracy * 100) }}%</b></span>
           <span>PERFECT <b class="c-cyan">{{ p.settlement.perfect }}</b></span>

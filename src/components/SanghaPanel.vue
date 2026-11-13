@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { TEMPLE_RULES } from '../temple/rhythm.js'
 import { clampBounty } from '../temple/economy.js'
+import SealPanel from './SealPanel.vue'
 
 const props = defineProps({ p: { type: Object, required: true } })
 // 窄屏默认收起心愿板，给节奏台和 3D 场景让出空间；桌面端 CSS 忽略此状态
@@ -43,6 +44,10 @@ function setBounty(e) {
   e.target.value = props.p.wishBounty
 }
 
+// 两个弹层互斥，避免遮罩叠在一起把点击吃掉
+function openRules() { props.p.showSeals = false; props.p.showRules = true }
+function openSeals() { props.p.showRules = false; props.p.showSeals = true }
+
 /** 加入是「一起敲」，不是抢单：别人已经在诵也照样能进 */
 function wishState(w) {
   if (w.expired) return {
@@ -65,7 +70,8 @@ function wishState(w) {
       <span class="sangha-mini">{{ miniText }}</span>
       <div class="sangha-actions">
         <button class="sangha-toggle clickable" @click="collapsed = !collapsed">{{ collapsed ? '展开' : '收起' }}</button>
-        <button class="rules-btn clickable" @click="p.showRules = true">寺规 ?</button>
+        <button class="rules-btn clickable" @click="openSeals">禅印</button>
+        <button class="rules-btn clickable" @click="openRules">寺规 ?</button>
       </div>
     </div>
 
@@ -168,4 +174,6 @@ function wishState(w) {
       </div>
     </div>
   </Transition>
+
+  <SealPanel :p="p" />
 </template>

@@ -17,3 +17,9 @@
 
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
+
+# Service Worker 必须每次都回源校验，否则发新版后旧 SW 会一直把用户钉在旧缓存上
+/sw.js
+  Content-Type: application/javascript; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+  Service-Worker-Allowed: /

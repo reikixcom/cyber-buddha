@@ -8,7 +8,8 @@ import {
   TEMPLE_NEED, TEMPLE_POOL_BASE, TEMPLE_POOL_PER_OPENING,
   dayKey, needFor, clampBounty, shareOf, earnedPart
 } from '../temple/economy.js'
-import { sanitizePracticeSave } from '../temple/save.js'
+import { sanitizePracticeSave, SEAL_KEEP } from '../temple/save.js'
+import { makeSeal, shortOf } from '../temple/seal.js'
 
 const TRAVEL_MS = 2200
 const JUDGE_X = 18
@@ -99,6 +100,10 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   const gradeKey = ref(0)
   const gradeVisible = ref(false)
   const settlement = ref(null)
+  /** 禅印回执链：一炷香一张，只留最近 SEAL_KEEP 张，短码互相串起来 */
+  const seals = ref([])
+  const lastSeal = ref(null)
+  const showSeals = ref(false)
 
   const lamp = ref(55)
   const online = ref(1480)
@@ -300,7 +305,27 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     }
     const r = settle(pattern.value, marks.value, online.value)
     phase.value = 'settle'
-    settlement.value = { ...r, round: round.value, wild: wildCount.value, online: online.value }
+    // 一炷香 = 一个区块：把可复算的敲击记录串到上一张回执后面
+    const seal = makeSeal({
+      round: round.value,
+      daySeed,
+      pattern: pattern.value,
+      marks: marks.value,
+      wild: wildCount.value,
+      online: online.value,
+      result: r,
+      prev: shortOf(seals.value[seals.value.length - 1]),
+      at: Date.now()
+    })
+    const firstSeal = seals.value.length === 0
+    seals.value = [...seals.value, seal.text].slice(-SEAL_KEEP)
+    lastSeal.value = seal
+    settlement.value = {
+      ...r, round: round.value, wild: wildCount.value,
+      online: online.value, sealShort: seal.short
+    }
+    if (firstSeal) pushLog('首张禅印已生成 · 心愿板「禅印」可复制给他人复算', true)
+    persist()
     const got = addBalance(r.reward, 'emit')
     if (got > 0) {
       pushLog(`第 ${round.value} 炷结算 · 合拍 ${Math.round(r.accuracy * 100)}% · +${got} $GONGDE`, got >= 30)
@@ -495,9 +520,13 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     openings.value = s.openings
     templePool.value = s.templePool
     templeCycles.value = s.templeCycles
+    // 接着存档里的炷号往下出块，刷新后不会再出现两张「第 1 炷」
+    round.value = s.round
     const target = s.activeWishId === savedTemple.id ? templeId : s.activeWishId
     activeWishId.value = target === templeId || others.some((w) => w.id === target && !w.done)
       ? target : templeId
+    seals.value = s.seals
+    lastSeal.value = null
     return true
   }
 
@@ -518,7 +547,11 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     openings.value = 0
     templePool.value = TEMPLE_POOL_BASE
     templeCycles.value = 1
+    round.value = 0
     activeWishId.value = templeId
+    seals.value = []
+    lastSeal.value = null
+    showSeals.value = false
     persist()
   }
 
@@ -576,7 +609,8 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
 
   return reactive({
     running, phase, round, pattern, marks, elapsed, chain, wildCount,
-    lastGrade, gradeKey, gradeVisible, settlement, lamp, lampPct, online, openings,
+    lastGrade, gradeKey, gradeVisible, settlement, seals, lastSeal, showSeals,
+    lamp, lampPct, online, openings,
     templePool, templeCycles, templeId, wishes, activeWish, activeWishId,
     showRules, myWishText, wishBounty,
     beatDone, accuracyNow, beatsOnTrack, countdown, judgeX: JUDGE_X,

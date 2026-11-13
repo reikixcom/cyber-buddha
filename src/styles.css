@@ -1207,3 +1207,117 @@ button { font-family: inherit; cursor: pointer; }
   .start-guide { margin-top: 20px; }
   .start-foot { margin-top: 18px; }
 }
+
+/* ---------- 禅印：回执 / 验签 / 账本 ---------- */
+.seal-chip {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em;
+  color: var(--gold); background: rgba(255, 204, 102, 0.07);
+  border: 1px solid rgba(255, 204, 102, 0.42); padding: 2px 7px; white-space: nowrap;
+}
+.seal-chip:hover { background: rgba(255, 204, 102, 0.2); box-shadow: 0 0 12px rgba(255, 204, 102, 0.28); }
+.settle-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.settle-seal {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em;
+  color: #9dc4d6; background: transparent; border: 0; padding: 0; white-space: nowrap;
+}
+.settle-seal b { color: var(--gold); font-weight: 400; }
+.settle-seal:hover { color: var(--cyan); }
+
+.seal-card {
+  width: min(660px, 92vw); max-height: 88vh; overflow-y: auto;
+  padding: 20px 24px 16px; pointer-events: auto;
+}
+.seal-card button, .seal-card textarea, .seal-card input { pointer-events: auto; }
+.seal-intro {
+  margin: 12px 0 0; font-size: 11px; line-height: 1.8; color: #9dc4d6;
+}
+.seal-tabs { display: flex; gap: 6px; margin-top: 14px; border-bottom: 1px solid rgba(0, 240, 255, 0.2); }
+.seal-tab {
+  padding: 7px 13px; font-size: 11px; letter-spacing: 0.08em;
+  color: #7e9cad; background: transparent; border: 1px solid transparent; border-bottom: 0;
+}
+.seal-tab:hover { color: var(--cyan); }
+.seal-tab.on {
+  color: var(--cyan); background: rgba(0, 240, 255, 0.07);
+  border-color: rgba(0, 240, 255, 0.32);
+}
+.seal-body { padding-top: 14px; }
+.seal-chain {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 10px; margin-bottom: 10px; font-size: 10px;
+  color: #7fe6b4; background: rgba(61, 255, 168, 0.06); border: 1px solid rgba(61, 255, 168, 0.28);
+}
+.seal-chain.bad { color: var(--magenta); background: rgba(255, 45, 149, 0.06); border-color: rgba(255, 45, 149, 0.34); }
+.seal-chain em { font-style: normal; color: #6e8ba3; font-size: 9px; }
+.chain-dot { width: 6px; height: 6px; border-radius: 50%; background: #3dffa8; box-shadow: 0 0 8px #3dffa8; }
+.seal-chain.bad .chain-dot { background: var(--magenta); box-shadow: 0 0 8px var(--magenta); }
+.seal-list { max-height: 38vh; overflow-y: auto; padding-right: 4px; }
+.seal-row {
+  padding: 8px 10px; margin-bottom: 6px;
+  background: rgba(0, 240, 255, 0.035); border: 1px solid rgba(0, 240, 255, 0.18);
+}
+.seal-row-main, .seal-row-sub { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.seal-row-sub { margin-top: 5px; }
+.seal-round { font-family: var(--font-mono); font-size: 11px; color: var(--cyan); }
+.seal-acc { font-family: var(--font-mono); font-size: 12px; color: #eafcff; }
+.seal-reward { font-family: var(--font-mono); font-size: 11px; color: var(--gold); }
+.seal-pg, .seal-time, .seal-prev { font-family: var(--font-mono); font-size: 9px; color: #6e8ba3; }
+.seal-short { font-family: var(--font-mono); font-size: 10px; color: var(--gold); letter-spacing: 0.06em; }
+.seal-copy, .seal-ghost {
+  margin-left: auto; padding: 3px 9px; font-size: 9px; letter-spacing: 0.08em;
+  color: var(--cyan); background: rgba(0, 240, 255, 0.06); border: 1px solid rgba(0, 240, 255, 0.4);
+}
+.seal-copy:hover, .seal-ghost:hover, .seal-primary:hover { background: rgba(0, 240, 255, 0.18); }
+.seal-empty { padding: 26px 12px; text-align: center; font-size: 11px; line-height: 1.8; color: #6e8ba3; }
+.seal-textarea {
+  display: block; width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 9px 10px; font-size: 10px; line-height: 1.6; color: #d9f4ff;
+  background: rgba(2, 8, 20, 0.8); border: 1px solid rgba(0, 240, 255, 0.26);
+}
+.seal-textarea:focus { outline: none; border-color: var(--cyan); }
+.seal-textarea::placeholder { color: #55738a; }
+.seal-textarea.mono { font-family: var(--font-mono); word-break: break-all; }
+.seal-actions { display: flex; align-items: center; gap: 9px; margin-top: 9px; flex-wrap: wrap; }
+.seal-primary {
+  padding: 6px 15px; font-size: 11px; letter-spacing: 0.1em; color: #05121c;
+  background: var(--cyan); border: 1px solid var(--cyan);
+}
+.seal-primary.danger { color: #1a0510; background: var(--magenta); border-color: var(--magenta); }
+.seal-primary.danger:hover { background: #ff63b0; }
+.seal-hint { font-size: 9px; color: #6e8ba3; }
+.seal-result { margin-top: 12px; padding: 10px 12px; border: 1px solid; }
+.seal-result.ok { color: #7fe6b4; background: rgba(61, 255, 168, 0.06); border-color: rgba(61, 255, 168, 0.34); }
+.seal-result.bad { color: var(--magenta); background: rgba(255, 45, 149, 0.06); border-color: rgba(255, 45, 149, 0.34); }
+.seal-result-title { font-size: 11px; line-height: 1.6; }
+.seal-detail {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 5px 14px; margin-top: 9px; font-size: 10px; color: #9dc4d6;
+}
+.seal-detail b { color: #eafcff; font-family: var(--font-mono); font-weight: 400; }
+.seal-note {
+  margin-top: 14px; padding-top: 10px; border-top: 1px dashed rgba(0, 240, 255, 0.2);
+  font-size: 9px; line-height: 1.8; color: #6e8ba3;
+}
+.seal-section-title {
+  margin: 4px 0 8px; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.16em; color: var(--cyan);
+}
+.seal-section-title:not(:first-child) { margin-top: 18px; }
+.seal-foot {
+  margin-top: 14px; padding-top: 10px; border-top: 1px dashed rgba(0, 240, 255, 0.2);
+  font-size: 9px; color: #6e8ba3; letter-spacing: 0.06em;
+}
+.seal-flash { color: var(--gold); }
+
+@media (max-width: 860px) {
+  .seal-card { width: calc(100vw - 18px); max-height: 86vh; padding: 14px 13px 12px; }
+  .seal-intro { font-size: 10px; line-height: 1.7; }
+  .seal-tab { padding: 6px 8px; font-size: 10px; }
+  .seal-list { max-height: 34vh; }
+  .seal-row-main, .seal-row-sub { gap: 7px; }
+  .seal-pg, .seal-time, .seal-prev { font-size: 8px; }
+  .seal-detail { grid-template-columns: repeat(2, 1fr); gap: 4px 8px; }
+  .seal-chip { font-size: 8px; padding: 1px 4px; }
+  .settle-seal { font-size: 8px; }
+  .settle-seal b { display: none; }
+}
