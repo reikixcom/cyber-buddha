@@ -66,6 +66,8 @@ const toasts = ref([])
 const logs = ref([])
 const hovered = ref(null)
 const activeId = ref(null)
+/** 节奏台收起来：想安静看寺就收起，要敲时再展开；只影响界面，不影响结算 */
+const deckOpen = ref(true)
 
 let engine = null
 let seq = 0
@@ -132,6 +134,7 @@ function save() {
       streak: streak.value,
       muted: muted.value,
       quality: quality.value,
+      deckOpen: deckOpen.value,
       // 心愿与托管是真实扣过款的资产，必须和余额一起落盘
       practice: getPracticeSnapshot()
     }))
@@ -152,6 +155,7 @@ function load() {
     streak.value = normalizeStreak(d.streak)
     muted.value = !!d.muted
     quality.value = d.quality === 'low' ? 'low' : 'high'
+    if (d.deckOpen === false) deckOpen.value = false
     pendingPracticeSave = d.practice ?? null
   } catch { /* 忽略损坏的存档 */ }
 }
@@ -196,6 +200,10 @@ const practice = usePractice({
   onCelebrate: () => {
     engine?.celebrate()
     if (typeof navigator.vibrate === 'function') navigator.vibrate([14, 60, 14])
+  },
+  // 节拍声：跟着「咚」敲比盯着 255ms 一格的光点准得多。静音按钮一关就全静。
+  onBeat: (accent, delay) => {
+    if (!muted.value) engine?.beat(accent, delay)
   },
   onPersist: save,
   onBroadcast: (e) => broadcastToSangha(e)
@@ -312,6 +320,13 @@ watch(rankIdx, (now, before) => {
   pushLog(`果位晋升 · ${name}（累计 ${merit.value} $G）`, true)
   addToast(`晋升 · ${name}`, `累计功德 ${merit.value} $G`)
   if (started.value) engine?.celebrate()
+})
+
+/** 收起节奏台时结算面板看不见，这一炷的结果必须另找地方说一声 */
+watch(() => practice.settlement, (s) => {
+  if (!s || deckOpen.value) return
+  addToast(`第 ${s.round} 炷 · 合拍 ${Math.round(s.accuracy * 100)}%`,
+    `+${s.reward} $G · 禅印 ${s.sealShort}`)
 })
 
 function onMerit(amount, type) {
@@ -527,7 +542,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-root">
+  <div class="app-root" :class="{ 'deck-collapsed': !deckOpen }">
     <canvas ref="canvasRef" class="scene-canvas"></canvas>
 
     <div class="fx-layer fx-scanlines"></div>
@@ -564,8 +579,10 @@ onBeforeUnmount(() => {
     <PracticeDeck
       v-if="started"
       :p="practice"
+      :open="deckOpen"
       @knock="practice.knock()"
       @toggle="practice.toggle()"
+      @toggle-open="deckOpen = !deckOpen"
     />
 
     <SanghaPanel v-if="started" :p="practice" :l="ledger" :s="sangha" />

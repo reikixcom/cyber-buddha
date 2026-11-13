@@ -1,6 +1,6 @@
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import {
-  makePattern, seedFrom, judge, settle,
+  makePattern, seedFrom, judge, settle, dueBeats,
   WINDOW, BEATS_PER_STICK, BASE_RELEASE
 } from '../temple/rhythm.js'
 import {
@@ -14,6 +14,8 @@ import { utcDayKey, fallbackDaySeed } from '../temple/beacon.js'
 
 const TRAVEL_MS = 2200
 const JUDGE_X = 18
+/** 拍前多久排程节拍声：够覆盖一帧以上的抖动，又不至于排太远（暂停时已经排出的仍会响） */
+const BEAT_LEAD_MS = 180
 const BOOST_COST = 10
 const GRADE_SHOW_MS = 520
 /** 刚挂上的心愿留几秒给挂单人撤回，也给玩家先看到「等共修者来」 */
@@ -91,7 +93,7 @@ function makeMarket(temple) {
  * 余额、托管、禅印都在本机；「谁在寺里、谁在诵哪条愿」来自公共公告板，
  * 连不上才退回本地演示，并在界面上明确标出来。
  */
-export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisual, onCelebrate, onPersist, onSeal, onBroadcast }) {
+export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisual, onCelebrate, onPersist, onSeal, onBroadcast, onBeat }) {
   const beacon = ref(fallbackBeacon())
   let daySeed = beacon.value.seed
   /** 本炷快照：信标中途切换不影响正在敲的这一炷，下一炷才用新种子 */
@@ -103,6 +105,8 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   const pattern = ref(makePattern(seedFrom(0, daySeed)))
   const marks = ref({})
   const elapsed = ref(0)
+  /** 节拍报时排到第几拍了：只往前推，不回头，暂停后继续仍接着报 */
+  let soundedUpTo = 0
   const chain = ref(0)
   const wildCount = ref(0)
   const lastGrade = ref('')
@@ -322,6 +326,7 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     elapsed.value = 0
     lastGrade.value = ''
     gradeVisible.value = false
+    soundedUpTo = 0
     clearTimeout(gradeTimer)
     stickStart = performance.now()
     phase.value = 'running'
@@ -382,6 +387,13 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     if (phase.value !== 'running') return
     const e = performance.now() - stickStart
     elapsed.value = e
+    // 节拍报时：拍前 180ms 交给音频时钟排程，rAF 只负责算「还差多少毫秒」。
+    // 已经过去的拍不再补响，否则暂停回来会一次响一串。
+    if (onBeat) {
+      const { due, next } = dueBeats(pattern.value.beats, soundedUpTo, e, BEAT_LEAD_MS)
+      for (const d of due) onBeat(d.accent, Math.max(0, d.ahead) / 1000)
+      soundedUpTo = next
+    }
     // beats 按时间升序；自动漏拍只记 marks 和断连击，不刷判定飘字（64 拍会刷屏）
     for (const b of pattern.value.beats) {
       if (e <= b.at + WINDOW.good) break

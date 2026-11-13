@@ -262,6 +262,9 @@ export class TempleEngine {
     this.audio.bell()
   }
 
+  /** 节拍报时：delay 秒后响。排程交给音频时钟，界面只负责算差多少毫秒 */
+  beat(accent = false, delay = 0) { this.audio.beat(accent, delay) }
+
   unlockAudio() { this.audio.unlock() }
   setMuted(v) { this.audio.setMuted(v) }
   setQuality(q) {

@@ -2,8 +2,12 @@
 import { computed } from 'vue'
 import WoodenFish from './WoodenFish.vue'
 
-const props = defineProps({ p: { type: Object, required: true } })
-const emit = defineEmits(['knock', 'toggle'])
+const props = defineProps({
+  p: { type: Object, required: true },
+  /** 节奏台是否展开。收起只隐藏轨道与愿条，敲与暂停照旧可用 */
+  open: { type: Boolean, default: true }
+})
+const emit = defineEmits(['knock', 'toggle', 'toggle-open'])
 
 const GRADES = {
   perfect: { text: 'PERFECT', color: '#00f0ff' },
@@ -59,11 +63,11 @@ function tapToggle(e) {
 </script>
 
 <template>
-  <div class="deck-wrap">
+  <div class="deck-wrap" :class="{ 'is-collapsed': !open }">
     <!-- 桌面：节奏台左侧常驻的电子木鱼，镜头怎么转都在 -->
     <WoodenFish class="fish-stage" size="large" :hit-key="p.gradeKey" :grade="p.lastGrade" :chain="p.chain" />
 
-    <div class="deck panel" :class="{ 'is-paused': paused }">
+    <div class="deck panel" :class="{ 'is-paused': paused, 'is-collapsed': !open }">
       <div class="deck-head">
         <div class="deck-title">
           <span class="panel-title">
@@ -82,58 +86,68 @@ function tapToggle(e) {
           第 <b class="c-cyan">{{ p.beatDone }}</b>/{{ p.beatsPerStick }} 拍
           <span class="meta-extra"><span class="deck-sep">/</span> 剩余 {{ p.countdown.toFixed(1) }}s</span>
         </div>
+        <button
+          class="deck-toggle clickable"
+          :title="open ? '收起节奏台 · 收起后空格/「敲」照样能敲' : '展开节奏台 · 看节拍轨道与当前共诵的心愿'"
+          @click="emit('toggle-open')"
+        >
+          <span class="desktop-only">{{ open ? '收起 ▾' : '展开 ▴' }}</span>
+          <span class="mobile-inline">{{ open ? '▾' : '▴' }}</span>
+        </button>
       </div>
 
-      <!-- 当前共诵的愿望直接贴在敲击台上：目标、同修人数、我能分多少一眼看全 -->
-      <div v-if="p.activeWish" class="vow-strip active" :class="{ 'is-temple': p.activeWish.kind === 'temple' }">
-        <span class="vow-tag">{{ p.activeWish.kind === 'temple' ? '常住共修' : '代诵中' }}</span>
-        <span class="vow-text">「{{ p.activeWish.text }}」</span>
-        <span class="vow-crowd">{{ vowCrowd }} 人同诵 · 你 {{ myHits }} 击</span>
-        <span class="vow-num">{{ p.activeWish.progress }}/{{ p.activeWish.need }} 击<span class="vow-eta"> · 约 {{ vowLeft }} 炷</span></span>
-        <span class="vow-bounty">{{ myShare > 0 ? '预计 +' + myShare + ' $G' : '按击数分' }}</span>
-        <i class="vow-bar" :style="{ width: vowPct + '%' }"></i>
-      </div>
-      <div v-else class="vow-strip empty">
-        <span class="vow-tag idle">未共诵</span>
-        <span class="vow-text">万佛墙点「加入共诵」· 别人已经在敲也照样能一起敲</span>
-      </div>
+      <template v-if="open">
+        <!-- 当前共诵的愿望直接贴在敲击台上：目标、同修人数、我能分多少一眼看全 -->
+        <div v-if="p.activeWish" class="vow-strip active" :class="{ 'is-temple': p.activeWish.kind === 'temple' }">
+          <span class="vow-tag">{{ p.activeWish.kind === 'temple' ? '常住共修' : '代诵中' }}</span>
+          <span class="vow-text">「{{ p.activeWish.text }}」</span>
+          <span class="vow-crowd">{{ vowCrowd }} 人同诵 · 你 {{ myHits }} 击</span>
+          <span class="vow-num">{{ p.activeWish.progress }}/{{ p.activeWish.need }} 击<span class="vow-eta"> · 约 {{ vowLeft }} 炷</span></span>
+          <span class="vow-bounty">{{ myShare > 0 ? '预计 +' + myShare + ' $G' : '按击数分' }}</span>
+          <i class="vow-bar" :style="{ width: vowPct + '%' }"></i>
+        </div>
+        <div v-else class="vow-strip empty">
+          <span class="vow-tag idle">未共诵</span>
+          <span class="vow-text">万佛墙点「加入共诵」· 别人已经在敲也照样能一起敲</span>
+        </div>
 
-      <div class="track" @pointerdown="tapKnock" @click="tapKnock">
-        <div class="track-rail"></div>
-        <div class="judge-line" :style="{ left: p.judgeX + '%' }"></div>
-        <div
-          v-for="b in p.beatsOnTrack" :key="b.index"
-          class="beat" :class="[b.grade, { accent: b.accent }]"
-          :style="{ left: b.left + '%' }"
-        ><i></i></div>
-        <Transition name="grade-pop">
-          <div v-if="grade && p.gradeVisible && !paused" :key="p.gradeKey" class="grade-fly" :style="{ color: grade.color, textShadow: '0 0 14px ' + grade.color }">
-            {{ grade.text }}
+        <div class="track" @pointerdown="tapKnock" @click="tapKnock">
+          <div class="track-rail"></div>
+          <div class="judge-line" :style="{ left: p.judgeX + '%' }"></div>
+          <div
+            v-for="b in p.beatsOnTrack" :key="b.index"
+            class="beat" :class="[b.grade, { accent: b.accent }]"
+            :style="{ left: b.left + '%' }"
+          ><i></i></div>
+          <Transition name="grade-pop">
+            <div v-if="grade && p.gradeVisible && !paused" :key="p.gradeKey" class="grade-fly" :style="{ color: grade.color, textShadow: '0 0 14px ' + grade.color }">
+              {{ grade.text }}
+            </div>
+          </Transition>
+          <div class="track-label">跟着节拍声或光点落拍 · 金色为重拍</div>
+          <div v-if="paused" class="pause-veil">已暂停 · 点「继续」回到这一拍</div>
+        </div>
+
+        <div v-if="p.settlement && !paused" class="settle">
+          <div class="settle-title">
+            第 {{ p.settlement.round }} 炷 · 结算
+            <button v-if="p.settlement.sealShort" class="settle-seal clickable" @click="p.showSeals = true">
+              禅印 <b>{{ p.settlement.sealShort }}</b> · 复制 / 验签 →
+            </button>
           </div>
-        </Transition>
-        <div class="track-label">点轨道或「敲」跟着光点落拍 · 金色为重拍</div>
-        <div v-if="paused" class="pause-veil">已暂停 · 点「继续」回到这一拍</div>
-      </div>
-
-      <div v-if="p.settlement && !paused" class="settle">
-        <div class="settle-title">
-          第 {{ p.settlement.round }} 炷 · 结算
-          <button v-if="p.settlement.sealShort" class="settle-seal clickable" @click="p.showSeals = true">
-            禅印 <b>{{ p.settlement.sealShort }}</b> · 复制 / 验签 →
-          </button>
+          <div class="settle-row">
+            <span>合拍率 <b>{{ Math.round(p.settlement.accuracy * 100) }}%</b></span>
+            <span>PERFECT <b class="c-cyan">{{ p.settlement.perfect }}</b></span>
+            <span>GOOD <b class="c-gold">{{ p.settlement.good }}</b></span>
+            <span>MISS <b>{{ p.settlement.miss }}</b></span>
+            <span>乱敲 <b class="c-pink">{{ p.settlement.wild }}</b></span>
+          </div>
+          <div class="settle-reward">
+            +{{ p.settlement.reward }} <small>$GONGDE</small>
+            <em>基础 {{ p.baseRelease }} × 合拍率 × 稀释 {{ p.settlement.dilution.toFixed(2) }}（{{ p.settlement.online }} 人在场）</em>
+          </div>
         </div>
-        <div class="settle-row">
-          <span>合拍率 <b>{{ Math.round(p.settlement.accuracy * 100) }}%</b></span>
-          <span>PERFECT <b class="c-cyan">{{ p.settlement.perfect }}</b></span>
-          <span>GOOD <b class="c-gold">{{ p.settlement.good }}</b></span>
-          <span>MISS <b>{{ p.settlement.miss }}</b></span>
-          <span>乱敲 <b class="c-pink">{{ p.settlement.wild }}</b></span>
-        </div>
-        <div class="settle-reward">
-          +{{ p.settlement.reward }} <small>$GONGDE</small>
-          <em>基础 {{ p.baseRelease }} × 合拍率 × 稀释 {{ p.settlement.dilution.toFixed(2) }}（{{ p.settlement.online }} 人在场）</em>
-        </div>
-      </div>
+      </template>
 
       <div class="deck-foot">
         <div class="deck-stats">

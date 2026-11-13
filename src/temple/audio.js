@@ -138,6 +138,36 @@ export class TempleAudio {
     this._tone(1180, { type: 'square', peak: 0.025, attack: 0.002, decay: 0.045 })
   }
 
+  /**
+   * 节拍木鱼：只报拍、不进判定。
+   *
+   * 为什么要有：64 拍在 25 秒里跑完，光点之间只差 255–405ms，
+   * 靠肉眼看小屏幕跟拍是天生的难。声音是人类最准的节拍器 ——
+   * 跟着「咚」敲，比跟着光点敲准得多。
+   *
+   * delay 以秒计：调用方在拍前 150ms 就排程，交给 WebAudio 的时钟去精确发声，
+   * 不用 rAF 的抖动，也不占主线程。音量刻意压得很低：它是提示，不是主角。
+   */
+  beat(accent = false, delay = 0) {
+    if (!this.ctx) return
+    const d = Math.max(0, Number(delay) || 0)
+    this._noiseBurst({
+      peak: accent ? 0.11 : 0.06,
+      attack: 0.001,
+      decay: 0.045,
+      freq: accent ? 780 : 1020,
+      q: 3.6,
+      delay: d
+    })
+    this._tone(accent ? 196 : 262, {
+      type: 'triangle',
+      peak: accent ? 0.075 : 0.045,
+      attack: 0.002,
+      decay: 0.085,
+      delay: d
+    })
+  }
+
   /** 环境底噪：低频 drone + 雨夜白噪 */
   _startAmbient() {
     const ctx = this.ctx

@@ -751,6 +751,18 @@ button { font-family: inherit; cursor: pointer; }
 }
 .deck-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .deck-title { display: flex; align-items: center; gap: 12px; }
+/* 收起节奏台：只留标题行与操作行，把 3D 场景还给玩家。敲与暂停照旧可用 */
+.deck.is-collapsed { padding: 9px 14px 10px; }
+.deck.is-collapsed .deck-foot { margin-top: 7px; }
+.deck-wrap.is-collapsed .fish-stage { display: none; }
+.deck-toggle {
+  flex: none; padding: 3px 9px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em;
+  color: #8fb6c9; background: rgba(0, 240, 255, 0.06);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.deck-toggle:hover { color: #eafcff; border-color: rgba(0, 240, 255, 0.7); background: rgba(0, 240, 255, 0.12); }
 .deck-round {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em;
   color: var(--gold); border: 1px solid rgba(255, 204, 102, 0.4); padding: 2px 8px;
@@ -1122,7 +1134,8 @@ button { font-family: inherit; cursor: pointer; }
 }
 .deck button, .deck .track, .sangha button, .sangha input { touch-action: manipulation; }
 .track { cursor: pointer; }
-.btn-knock:focus-visible, .btn-mini:focus-visible, .wish-btn:focus-visible {
+.btn-knock:focus-visible, .btn-mini:focus-visible, .wish-btn:focus-visible,
+.deck-toggle:focus-visible {
   outline: 2px solid var(--gold); outline-offset: 2px;
 }
 .live-dot.off { background: #6e8ba3; box-shadow: none; animation: none; }
@@ -1254,6 +1267,9 @@ button { font-family: inherit; cursor: pointer; }
   /* 摇杆放在节奏台上方左侧，避开右侧心愿板与底部快捷栏 */
   .joy-wrap { display: block; position: absolute; left: 12px; bottom: 300px; z-index: 13; pointer-events: none; }
   .joy-base { pointer-events: auto; }
+  /* 节奏台收起后只剩一条，摇杆跟着往下走，别悬在半空 */
+  .app-root.deck-collapsed .joy-wrap { bottom: 196px; }
+  .deck-toggle { padding: 2px 7px; font-size: 10px; letter-spacing: 0.06em; }
 
   /* 节奏台：整条轨道 + 大按钮都是 tap 区 */
   .deck-wrap { width: calc(100vw - 20px); bottom: 88px; }

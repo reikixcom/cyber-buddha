@@ -29,8 +29,8 @@ const emit = defineEmits(['enter', 'reset', 'share'])
         <div class="start-steps">
           <div class="start-step">
             <b>01</b>
-            <h3>跟着光点敲</h3>
-            <p>六十四拍分八句，合拍才记功德。乱敲不计，挂机刷不出来。</p>
+            <h3>跟着节拍声敲</h3>
+            <p>六十四拍分八句，跟着「咚」落拍才记功德。乱敲不计，挂机刷不出来。</p>
           </div>
           <div class="start-step">
             <b>02</b>

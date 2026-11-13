@@ -12,7 +12,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  seedFrom, makePattern, judge, settle,
+  seedFrom, makePattern, judge, settle, dueBeats,
   BEATS_PER_STICK, BEATS_PER_PHRASE, WINDOW, WEIGHT,
   BASE_RELEASE, PREP_MS, TEMPLE_RULES
 } from '../src/temple/rhythm.js'
@@ -48,12 +48,34 @@ test('makePattern：64 拍分 8 句，时间严格升序，终点落在 duration
   assert.notDeepEqual(makePattern(p.seed + 1), p)
 })
 
-test('判定窗不重叠：任意两拍间隔都大于 2×GOOD 窗口，否则乱敲也能命中', () => {
+test('判定窗放宽后仍保证每拍够得着：间隔至少是一倍半 GOOD 窗口', () => {
   const p = makePattern(seedFrom(7, 20261113))
   for (let i = 1; i < p.beats.length; i++) {
     const gap = p.beats[i].at - p.beats[i - 1].at
-    assert.ok(gap > 2 * WINDOW.good, `第 ${i} 拍间隔 ${gap}ms 太密，判定窗会重叠`)
+    assert.ok(gap > 1.5 * WINDOW.good, `第 ${i} 拍间隔 ${gap}ms 太密，窗口会吃掉整拍`)
   }
+})
+
+test('相邻窗口有重叠时按最近的一拍归属，同一拍不会被判两次', () => {
+  const p = makePattern(seedFrom(7, 20261113))
+  // 找一对间距小于 2×GOOD 的相邻拍（放宽窗口后必然存在）
+  const idx = p.beats.findIndex((b, i) => i > 0 && b.at - p.beats[i - 1].at < 2 * WINDOW.good)
+  assert.ok(idx > 0, '这一炷里应有贴得较近的相邻拍')
+
+  const b0 = p.beats[idx - 1]
+  const b1 = p.beats[idx]
+  const mid = Math.round((b0.at + b1.at) / 2)
+  const used = new Set()
+
+  const first = judge(p, mid - 12, used)
+  assert.equal(first.beat, idx - 1, '偏前半拍应归前一拍')
+  used.add(first.beat)
+
+  const second = judge(p, mid + 12, used)
+  assert.equal(second.beat, idx, '偏后半拍应归后一拍')
+
+  // 同一拍再敲一次不能再计权重
+  assert.equal(judge(p, b0.at, new Set([idx - 1])).grade, 'wild')
 })
 
 test('judge：perfect / good / wild 边界与 used 去重', () => {
@@ -70,16 +92,21 @@ test('judge：perfect / good / wild 边界与 used 去重', () => {
   assert.equal(judge(p, at, new Set([0])).grade, 'wild')
 })
 
-test('judge 在密集段落命中最近的未判定拍，越窗即 wild', () => {
+test('judge 在密集段落命中最近的未判定拍，离所有拍都远才 wild', () => {
   const p = makePattern(seedFrom(11, 20261113))
   const used = new Set([0, 1, 2])
   const target = p.beats[3]
   const r = judge(p, target.at + 20, used)
   assert.equal(r.beat, 3)
   assert.equal(r.grade, 'perfect')
-  // 两拍之间的空隙必为 wild（间隔 > 2×good 窗口，中点离两边都 > 105ms）
-  const gapMid = (p.beats[3].at + p.beats[4].at) / 2
-  assert.equal(judge(p, gapMid, new Set([0, 1, 2])).grade, 'wild')
+
+  // 放宽窗口后两拍之间不再有「死区」：落在缝里也归更近的那一拍，不会白敲
+  const next = p.beats[4]
+  const mid = judge(p, (target.at + next.at) / 2, new Set([0, 1, 2]))
+  if (next.at - target.at < 2 * WINDOW.good) assert.notEqual(mid.grade, 'wild')
+
+  // 真正远离所有未判定拍才算乱敲
+  assert.equal(judge(p, target.at - WINDOW.good - 40, new Set([0, 1, 2])).grade, 'wild')
 })
 
 // ---------------------------------------------------------------- 结算
@@ -254,4 +281,37 @@ test('寺规文本与实际常量保持一致，免责声明永远在最后', ()
   // 接入共修网络后不再是「全部本地模拟」，但免责与边界必须仍在最后一条
   assert.match(TEMPLE_RULES.at(-1), /未上链/)
   assert.match(TEMPLE_RULES.at(-1), /不承诺任何收益/)
+})
+
+// ---------------------------------------------------------------- 节拍报时
+
+test('dueBeats：只取进入排程窗口的拍，远处的先不响', () => {
+  const beats = [{ at: 2200, accent: true }, { at: 2500, accent: false }, { at: 2800, accent: false }]
+  // 离第一拍还有 1 秒：什么也不响，游标不动
+  assert.deepEqual(dueBeats(beats, 0, 1200, 180), { due: [], next: 0 })
+  // 进入拍前 180ms：报第一拍，且带着「还差多少」
+  const near = dueBeats(beats, 0, 2020, 180)
+  assert.equal(near.due.length, 1)
+  assert.equal(near.due[0].index, 0)
+  assert.equal(near.due[0].accent, true)
+  assert.equal(near.due[0].ahead, 180)
+  assert.equal(near.next, 1)
+})
+
+test('dueBeats：跳跃式前进时把跳过的拍吞掉，不补响', () => {
+  const beats = [{ at: 1000 }, { at: 1200 }, { at: 1400 }, { at: 1600 }]
+  // 暂停/卡顿后 elapsed 已经到 1500：1400 那拍过去太久，不补响
+  const r = dueBeats(beats, 0, 1500, 180, 60)
+  assert.deepEqual(r.due.map((d) => d.index), [3])
+  assert.equal(r.next, 4)
+})
+
+test('dueBeats：连续密集拍一次取出，不丢拍', () => {
+  const beats = [{ at: 1000 }, { at: 1200 }, { at: 1400 }, { at: 1600 }]
+  const r = dueBeats(beats, 0, 1240, 180)
+  assert.deepEqual(r.due.map((d) => d.index), [1, 2])
+  assert.equal(r.next, 3)
+  // 下一帧从游标接着取，不会重复报
+  const r2 = dueBeats(beats, r.next, 1260, 180)
+  assert.deepEqual(r2.due.map((d) => d.index), [])
 })

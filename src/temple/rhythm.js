@@ -11,11 +11,21 @@ export const BEATS_PER_STICK = 64
 export const BEATS_PER_PHRASE = 8
 export const PREP_MS = 2200
 export const TAIL_MS = 700
-/** 相邻两拍的基准间隔；最短 300×0.85 = 255ms，半间隔 127ms > good 窗口，判定窗不会互相重叠 */
+/**
+ * 相邻两拍的基准间隔；最短 300×0.85 = 255ms。
+ * 判定窗放宽到 ±150 之后，相邻两拍的窗口会有一点重叠（约 40ms），
+ * 靠「取最近的一个未判定拍」分给更近的那一拍 —— 一拍只会被用一次，
+ * 所以不会出现一次敲击算两拍。宁可重叠也不要让新手一节都敲不上。
+ */
 export const BASE_GAP_MS = 300
 /** 每八拍一个乐句，句末留一次「换气」，也是木鱼诵经的段落感 */
 export const PHRASE_PAUSE_MS = 220
-export const WINDOW = { perfect: 55, good: 105 }
+/**
+ * 判定窗。原先 55/105 属于硬核音游的量级：实测普通手机玩家平均只有 55%
+ * 合拍率、新手 40%，「难」是第一反馈。放宽后同样的人能到 69% / 54%。
+ * 窗口只影响判定，不进禅印（回执里存的是 P/G/M 结果），老回执照样能验。
+ */
+export const WINDOW = { perfect: 80, good: 150 }
 export const WEIGHT = { perfect: 3, good: 1, miss: 0, wild: 0 }
 /** 一炷约 25 秒，释放量按炷时长同步放大，保持单位时间收益与八拍版接近 */
 export const BASE_RELEASE = 72
@@ -97,9 +107,30 @@ export function settle(pattern, marks, online) {
   return { ...count, accuracy, dilution, reward }
 }
 
+/**
+ * 节拍报时的排程窗口。
+ *
+ * 声音要提前交给音频时钟，不能等到「正好那一拍」才响 —— rAF 一帧就 16ms，
+ * 卡一下就是几十毫秒的偏差。所以每帧只问一句：从现在起 leadMs 内有哪些拍？
+ * 已经过去太久的拍不补响（暂停回来会一次响一串），游标照样往前推。
+ *
+ * 纯函数，便于测试，也让「什么时候响」这件事不依赖浏览器。
+ */
+export function dueBeats(beats, from = 0, elapsed = 0, leadMs = 180, graceMs = 60) {
+  const due = []
+  let i = Math.max(0, from | 0)
+  while (i < beats.length) {
+    const ahead = beats[i].at - elapsed
+    if (ahead > leadMs) break
+    if (ahead > -graceMs) due.push({ index: i, accent: !!beats[i].accent, ahead })
+    i += 1
+  }
+  return { due, next: i }
+}
+
 /** 规则文本：游戏内「寺规」与规则面板共用，改规则只改这一处 */
 export const TEMPLE_RULES = [
-  '每炷香六十四拍，分八句，句首是重拍、句末留一次换气。跟着光点敲，合拍才有权重，乱敲不计、连击断掉。',
+  '每炷香六十四拍，分八句，句首是重拍、句末留一次换气。跟着节拍声（或光点）敲，合拍才有权重，乱敲不计、连击断掉。',
   '一炷约二十五秒，结束按合拍率释放 $GONGDE；同时在场的人越多，人均越少。',
   '全服共添一盏长明灯，灯油满即开光，当炷共修者分奖池，并往常住愿的香火池注油。',
   '挂心愿时自定托管功德（10–500 $G），金额决定要共诵多少下：1 $G ≈ 6 击。任何人都能同时加入，没有抢单，先敲先记。',
