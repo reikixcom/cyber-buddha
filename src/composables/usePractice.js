@@ -364,37 +364,46 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     }
     const r = settle(pattern.value, marks.value, online.value)
     phase.value = 'settle'
-    // 一炷香 = 一个区块：把可复算的敲击记录串到上一张回执后面
-    const seal = makeSeal({
-      round: round.value,
-      daySeed: stickSeed,
-      beacon: stickBeacon,
-      pattern: pattern.value,
-      marks: marks.value,
-      wild: wildCount.value,
-      online: online.value,
-      result: r,
-      prev: shortOf(seals.value[seals.value.length - 1]),
-      at: Date.now()
-    })
-    const firstSeal = seals.value.length === 0
-    seals.value = [...seals.value, seal.text].slice(-SEAL_KEEP)
-    lastSeal.value = seal
+    // 一炷空过（六十四拍一声没落）不出禅印：这张回执只写着「全 MISS」，
+    // 既没有信息量，还会让别人在链上多验一条空记录；分享卡也会变成 0% 的难看样子
+    const hits = (r.perfect || 0) + (r.good || 0)
+    let seal = null
+    if (hits > 0) {
+      // 一炷香 = 一个区块：把可复算的敲击记录串到上一张回执后面
+      seal = makeSeal({
+        round: round.value,
+        daySeed: stickSeed,
+        beacon: stickBeacon,
+        pattern: pattern.value,
+        marks: marks.value,
+        wild: wildCount.value,
+        online: online.value,
+        result: r,
+        prev: shortOf(seals.value[seals.value.length - 1]),
+        at: Date.now()
+      })
+      const firstSeal = seals.value.length === 0
+      seals.value = [...seals.value, seal.text].slice(-SEAL_KEEP)
+      lastSeal.value = seal
+      if (firstSeal) pushLog('首张禅印已生成 · 心愿板「禅印」可复制给他人复算', true)
+    }
     settlement.value = {
       ...r, round: round.value, wild: wildCount.value,
-      online: online.value, sealShort: seal.short
+      online: online.value, sealShort: seal ? seal.short : ''
     }
-    if (firstSeal) pushLog('首张禅印已生成 · 心愿板「禅印」可复制给他人复算', true)
     persist()
     // 出印即认领：异步签名不成也不影响本炷结算，账本那边会如实标「未认领」
-    Promise.resolve(onSeal?.(seal)).catch(() => {})
+    if (seal) Promise.resolve(onSeal?.(seal)).catch(() => {})
     const got = addBalance(r.reward, 'emit')
     if (got > 0) {
       pushLog(`第 ${round.value} 炷结算 · 合拍 ${Math.round(r.accuracy * 100)}% · +${got} $GONGDE`, got >= 30)
     } else if (r.reward > 0) {
       pushLog(`第 ${round.value} 炷结算 · 今日增发额度已满，本炷不计功德`)
     } else {
-      pushLog(`第 ${round.value} 炷空过 · 乱敲与漏拍不计功德`)
+      pushLog(seal
+        ? `第 ${round.value} 炷空过 · 乱敲与漏拍不计功德`
+        : `第 ${round.value} 炷空过 · 六十四拍一声没落，未出禅印`)
+      if (!seal && duelPlaying.value) pushLog('应战这一炷空过 · 战帖没结算，重新点开战帖再来', true)
     }
     expireWishes()
     clearTimeout(settleTimer)
