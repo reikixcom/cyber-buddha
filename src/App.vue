@@ -214,6 +214,7 @@ const practice = usePractice({
   // 出印即认领，同时结算战帖：应战那一炷出印的瞬间就是分胜负的时刻
   onSeal: (seal) => {
     ledger.claim(seal.text)
+    reportScore(seal)
     if (!activeDuel || !practice.duelPlaying) return
     const who = activeDuel.name || '对手'
     const cmp = compareDuel(activeDuel.seal, seal)
@@ -271,6 +272,34 @@ const book = computed(() => bookOf({
   tickets: ledger.myTickets.length,
   seals: practice.seals.length
 }))
+
+/**
+ * 上榜：把这一炷的合拍率丢到公共公告板。
+ * 只在「近 24 小时个人最好成绩被刷新」时才真的发一条 ——
+ * 一炷香二十几秒，每炷都发等于自己把自己写到限流，榜上还全是自己。
+ */
+async function reportScore(seal) {
+  if (!seal?.text || !sangha?.live) return
+  try {
+    const r = await sangha.postScore({
+      round: seal.round,
+      accuracy: seal.accuracy,
+      sealShort: seal.short
+    })
+    if (!r?.ok) return
+    const rank = sangha.myRank
+    const pct = Math.round(seal.accuracy * 100)
+    if (rank && rank <= 3) {
+      pushLog(`上榜 · 近 24 小时合拍榜第 ${rank} 名 · ${pct}%`, true)
+      addToast(`上榜 · 第 ${rank} 名`, `近 24 小时合拍榜 · ${pct}%`)
+      engine?.celebrate()
+    } else if (rank) {
+      pushLog(`上榜 · 第 ${rank} 名（共 ${sangha.boardTotal} 人）· ${pct}%`)
+    } else {
+      pushLog(`成绩已发出 · ${pct}% · 榜单一同步就能看到排位`)
+    }
+  } catch { /* 上榜是加分项，失败不该影响这一炷的结算 */ }
+}
 
 broadcastToSangha = async (e) => {
   if (!e || !sangha.live) return
@@ -486,7 +515,10 @@ function readDuelLink() {
       duel.value = d
       pushLog(`收到战帖 · 第 ${d.seal.round} 炷 · 对方合拍 ${Math.round(d.seal.accuracy * 100)}%`, true)
       // 标签页标题也换成战帖：微信/Telegram 里点开时，第一眼就知道自己被点名了
-      try { document.title = `战帖 · 第 ${d.seal.round} 炷 · 赛博禅寺` } catch { /* 忽略 */ }
+      try {
+        const pct = Math.round(d.seal.accuracy * 100)
+        document.title = `${d.name || '同修'} 邀你对第 ${d.seal.round} 炷 · 已交出 ${pct}% · 赛博禅寺`
+      } catch { /* 忽略 */ }
     } else {
       pushLog('战帖没读出来 —— 链接可能被聊天软件截断，让对方重发完整一条')
     }
@@ -721,6 +753,7 @@ onBeforeUnmount(() => {
       :identity="ledger.identity"
       :online="sangha.online"
       :streak-days="streak.days"
+      :board-rank="sangha.myRank"
       :duel-result="duelResult"
       @close="shareOpen = false"
     />

@@ -77,6 +77,22 @@ const soulsLine = computed(() => {
   return narrow.value ? names.slice(0, 2).join(' · ') : names.join(' · ')
 })
 
+/** 榜：窄屏三条够了，多出来的位置留给万佛墙 */
+const boardRows = computed(() => (props.s?.board || []).slice(0, narrow.value ? 3 : 5))
+/** 榜上显示禅名（两字），法号放进悬停提示：禅名只有百来种组合，重名时得能分辨 */
+const rowHint = (r) => `${r.soul}（${r.name}）· 第 ${r.round} 炷 · 合拍 ${Math.round(r.acc * 100)}%`
+const boardTotal = computed(() => props.s?.boardTotal || 0)
+const myRank = computed(() => props.s?.myRank || 0)
+const myBest = computed(() => props.s?.myBest || 0)
+const boardHint = computed(() => {
+  const s = props.s
+  const base = '成绩由各人签名自报：签名只能证明「是这个法号说的」，不能证明是人敲的。但要较真时，可以要那张禅印回执自己复算。'
+  if (!s) return base
+  const bits = [base, '每人只留近 24 小时最好的一炷，刷数量上不了榜。']
+  if (s.scorePosted) bits.push(`本次已上报 ${s.scorePosted} 次成绩`)
+  return bits.join('\n')
+})
+
 function setBounty(e) {
   props.p.wishBounty = clampBounty(e.target.value)
   e.target.value = props.p.wishBounty
@@ -118,6 +134,34 @@ function wishState(w) {
         <span class="live-dot"></span>
         <span class="live-text">{{ boardStat }}</span>
         <span class="live-souls">{{ soulsLine }}</span>
+      </div>
+
+      <!-- 榜是「为什么现在就要敲一炷」最直接的理由：有个位置跟你有关 -->
+      <div class="board" :class="{ live, empty: !boardRows.length }" :title="boardHint">
+        <div class="board-head">
+          <span class="board-title">近 24 小时 · 合拍榜</span>
+          <span class="board-total">{{ boardTotal ? `${boardTotal} 人上榜` : '暂无人上榜' }}</span>
+        </div>
+        <div v-if="boardRows.length" class="board-list">
+          <div
+            v-for="r in boardRows" :key="r.pub" class="board-row"
+            :class="{ me: r.mine }" :title="rowHint(r)"
+          >
+            <span class="board-rank" :class="'r' + r.rank">{{ r.rank }}</span>
+            <span class="board-name">{{ r.mine ? '你' : r.soul }}</span>
+            <span class="board-acc">{{ Math.round(r.acc * 100) }}<small>%</small></span>
+            <span class="board-round">{{ r.round }}炷</span>
+          </div>
+        </div>
+        <div v-else class="board-empty">
+          {{ live ? '榜还空着 · 敲完一炷就上榜' : '接上公告板后才会有别人的成绩' }}
+        </div>
+        <div class="board-foot">
+          <template v-if="myRank && myRank > 3">你 第 {{ myRank }}{{ boardTotal > 10 ? ` · 共 ${boardTotal} 人` : '' }} · {{ Math.round(myBest * 100) }}%</template>
+          <template v-else-if="myRank">你在榜上 · 第 {{ myRank }}</template>
+          <template v-else-if="s?.best?.acc">你的最好 {{ Math.round(s.best.acc / 100) }}% · 待同步</template>
+          <template v-else>成绩由本人签名自报 · 可要回执自行复算</template>
+        </div>
       </div>
 
       <!-- 长明灯已移到右上角常驻卡片：这里不再重复占高度，窄屏折叠也不会把它藏掉 -->

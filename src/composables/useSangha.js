@@ -10,13 +10,16 @@
 import { reactive, ref, computed, watch } from 'vue'
 import { pullRecords, publishRecord } from '../temple/bulletin.js'
 import {
-  SANGHA_TOPIC, HEARTBEAT_MS, PRESENCE_WINDOW_MS,
-  makePresence, makeWish, makeJoin, makeDeliver,
-  parseSangha, aggregate, verifySangha, soulName, shortPub, wishId, signText
+  SANGHA_TOPIC, HEARTBEAT_MS, PRESENCE_WINDOW_MS, SCORE_WINDOW_MS,
+  makePresence, makeWish, makeJoin, makeDeliver, makeScore,
+  parseSangha, aggregate, verifySangha, soulName, shortPub, wishId, signText,
+  shouldPostScore
 } from '../temple/sangha.js'
 import { signMessage, verifyMessage } from '../temple/identity.js'
 
 export const SANGHA_KEY = 'cyber-temple-sangha-v1'
+/** 本地最好成绩：只存数，不上报；用它决定「这一炷值不值得占一次写额度」 */
+export const BEST_KEY = 'cyber-temple-best-v1'
 /** 轮询间隔：带抖动，避免所有人同一秒撞公告板 */
 const POLL_MS = 26000
 /** 每 N 次轮询做一次全中继对齐（否则发在别处中继的消息永远看不到） */
@@ -34,6 +37,22 @@ function loadCache() {
 
 function saveCache(texts) {
   try { localStorage.setItem(SANGHA_KEY, JSON.stringify(texts.slice(-KEEP))) } catch { /* 存不下就只留内存 */ }
+}
+
+function loadBest() {
+  try {
+    const raw = localStorage.getItem(BEST_KEY)
+    if (!raw) return null
+    const v = JSON.parse(raw)
+    const acc = Number(v?.acc)
+    const at = Number(v?.at)
+    if (!Number.isFinite(acc) || !Number.isFinite(at)) return null
+    return { acc: Math.max(0, Math.min(10000, Math.round(acc))), at, round: Number(v.round) || 0 }
+  } catch { return null }
+}
+
+function saveBest(b) {
+  try { localStorage.setItem(BEST_KEY, JSON.stringify(b)) } catch { /* 忽略 */ }
 }
 
 /**
@@ -85,6 +104,14 @@ export function useSangha({ id, probe, onEvent } = {}) {
   const souls = computed(() => agg.value.souls)
   const wishes = computed(() => agg.value.wishes)
   const reputation = computed(() => agg.value.reputation)
+  const board = computed(() => agg.value.board)
+  const boardTotal = computed(() => agg.value.boardTotal)
+  const myRank = computed(() => agg.value.myRank)
+  const myBest = computed(() => agg.value.myBest)
+  /** 本机最好成绩（可能比榜上那条更新，因为还在节流里没发出去） */
+  const best = ref(loadBest())
+  const scorePosted = ref(0)
+  const lastScoreAt = ref(0)
 
   const live = computed(() => status.value === 'live')
 
@@ -240,6 +267,43 @@ export function useSangha({ id, probe, onEvent } = {}) {
     return publish(makeDeliver({ pub: me.pub, sig, wishId: wish.id, hits, sealShort, at }).text, 'deliver')
   }
 
+  /**
+   * 出印后调用，决定这一炷值不值得占一次公告板写额度。
+   * 只报「近 24 小时个人最好成绩的刷新」：一炷香才二十几秒，
+   * 每炷都发会把自己写到 429，榜也会被自己灌满。
+   */
+  async function postScore({ round = 0, accuracy = 0, sealShort = '' } = {}) {
+    const me = id?.identity
+    if (!me?.priv) return { ok: false, reason: '还没有法号' }
+    if (Date.now() < postCoolUntil.value) return { ok: false, skipped: true, reason: '公告板写入退避中' }
+
+    const now = Date.now()
+    const gate = shouldPostScore({ acc: accuracy, best: best.value, lastAt: lastScoreAt.value, now })
+    if (!gate.post) return { ok: false, skipped: true, reason: gate.reason }
+
+    const sec = Math.floor(now / 1000)
+    const sig = await signMessage(me.priv, signText.score({
+      pub: me.pub, round, acc: gate.bp, sealShort, at: sec
+    }))
+    if (!sig) return { ok: false, reason: '签名失败' }
+
+    // 先记本地最好成绩：发失败要能退回去，否则「同分不再报」会把这一炷永远卡住
+    const prev = best.value
+    best.value = { acc: gate.bp, at: now, round }
+    saveBest(best.value)
+    lastScoreAt.value = now
+
+    const r = await publish(makeScore({ pub: me.pub, sig, round, acc: gate.bp, sealShort, at: now }).text, 'score')
+    if (r.ok) {
+      scorePosted.value += 1
+      return { ok: true, acc: gate.bp, rank: myRank.value }
+    }
+    best.value = prev
+    saveBest(prev)
+    lastScoreAt.value = 0
+    return { ok: false, reason: r.reason || '成绩没能发出去' }
+  }
+
   /** 逐张验证公告板上的签名，用来回答「这些人是不是真的存在」 */
   async function audit() {
     const v = await verifySangha(items.value, { verify: verifyMessage })
@@ -300,9 +364,10 @@ export function useSangha({ id, probe, onEvent } = {}) {
 
   return reactive({
     texts, items, agg, online, souls, wishes, reputation, selfPub,
+    board, boardTotal, myRank, myBest, best, scorePosted,
     status, statusText, live, reason, lastPull, lastBeat, beats, busy, known, cooling,
     relay, polls, mode,
-    pull, beat, postWish, join, deliver, audit, start, stop, reset,
+    pull, beat, postWish, join, deliver, postScore, audit, start, stop, reset,
     soulName, shortPub
   })
 }

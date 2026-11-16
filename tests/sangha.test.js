@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  makePresence, makeWish, makeJoin, makeDeliver, parseSangha,
-  aggregate, verifySangha, wishId, signText, soulName, shortPub,
+  makePresence, makeWish, makeJoin, makeDeliver, makeScore, parseSangha,
+  aggregate, verifySangha, wishId, signText, soulName, shortPub, shouldPostScore,
   PRESENCE_WINDOW_MS, WISH_TEXT_MAX
 } from '../src/temple/sangha.js'
 import { packRecord, b64urlEncode } from '../src/temple/seal.js'
@@ -150,4 +150,85 @@ test('昵称稳定：同一个法号每次算出来一样', () => {
   const pub = 'A'.repeat(44)
   assert.equal(soulName(pub), soulName(pub))
   assert.equal(shortPub(pub).length, 7)
+})
+
+// ---------------------------------------------------------------- 合拍榜
+
+async function scoreFrom(id, { round = 3, acc = 8200, sealShort = 'a'.repeat(16), at = T0MS } = {}) {
+  const sec = Math.floor(at / 1000)
+  const sig = await signMessage(id.priv, signText.score({ pub: id.pub, round, acc, sealShort, at: sec }))
+  return makeScore({ pub: id.pub, sig, round, acc, sealShort, at })
+}
+
+test('成绩记录：往返解析，越界与坏短码直接丢弃', async () => {
+  const a = await signer()
+  const s = await scoreFrom(a)
+  const p = parseSangha(s.text)
+  assert.equal(p.kind, 'score')
+  assert.equal(p.acc, 8200)
+  assert.equal(p.round, 3)
+
+  // 合拍率只能 0..10000（万分之一）
+  const bad = packRecord('CTS1', b64urlEncode(JSON.stringify([1, a.pub, 1, 12345, '', T0, s.sig])))
+  assert.equal(parseSangha(bad), null)
+  // 短码必须是 16 位十六进制
+  const badShort = packRecord('CTS1', b64urlEncode(JSON.stringify([1, a.pub, 1, 8000, 'zz', T0, s.sig])))
+  assert.equal(parseSangha(badShort), null)
+})
+
+test('榜取每人窗口内最高一炷：刷数量上不去，退步也顶不掉', async () => {
+  const a = await signer()
+  const b = await signer()
+  const items = [
+    parseSangha((await scoreFrom(a, { acc: 6000, at: T0MS - 30000 })).text),
+    parseSangha((await scoreFrom(a, { acc: 9000, at: T0MS - 20000 })).text),
+    parseSangha((await scoreFrom(a, { acc: 7000, at: T0MS - 10000 })).text),
+    parseSangha((await scoreFrom(b, { acc: 8500, at: T0MS - 5000 })).text)
+  ]
+  const agg = aggregate(items, { now: T0MS, selfPub: a.pub })
+  assert.equal(agg.boardTotal, 2)
+  assert.equal(agg.board[0].acc, 0.9)
+  assert.equal(agg.board[0].mine, true)
+  assert.equal(agg.myRank, 1)
+  assert.equal(agg.board[1].acc, 0.85)
+  assert.equal(agg.board[1].mine, false)
+})
+
+test('窗口外的成绩掉榜：24 小时前的第一名不再占位', async () => {
+  const a = await signer()
+  const old = await scoreFrom(a, { acc: 9900, at: T0MS - 25 * 3600 * 1000 })
+  const agg = aggregate([parseSangha(old.text)], { now: T0MS, selfPub: a.pub })
+  assert.equal(agg.boardTotal, 0)
+  assert.equal(agg.myRank, 0)
+  assert.equal(agg.myBest, 0)
+})
+
+test('同分先到者在前：并列时不靠时间戳抢先', async () => {
+  const a = await signer()
+  const b = await signer()
+  const agg = aggregate([
+    parseSangha((await scoreFrom(b, { acc: 8000, at: T0MS - 5000 })).text),
+    parseSangha((await scoreFrom(a, { acc: 8000, at: T0MS - 60000 })).text)
+  ], { now: T0MS })
+  assert.equal(agg.board[0].acc, agg.board[1].acc)
+  assert.equal(agg.board[0].pub, a.pub, '更早达成的排在前面')
+})
+
+test('上榜节流：只在刷新最好成绩时发，且受冷却约束', () => {
+  const now = T0MS
+  // 第一次：没有历史，直接上
+  assert.equal(shouldPostScore({ acc: 0.5, best: null, now }).post, true)
+  // 0 合拍不值得占一次写额度
+  assert.equal(shouldPostScore({ acc: 0, best: null, now }).post, false)
+  // 平过或退步都不发
+  assert.equal(shouldPostScore({ acc: 0.5, best: { acc: 5000, at: now - 60000 }, now }).post, false)
+  assert.equal(shouldPostScore({ acc: 0.4, best: { acc: 5000, at: now - 60000 }, now }).post, false)
+  // 刷新了但刚报过：压住
+  const cool = shouldPostScore({ acc: 0.7, best: { acc: 5000, at: now - 60000 }, lastAt: now - 1000, now })
+  assert.equal(cool.post, false)
+  assert.match(cool.reason, /秒后可再报/)
+  // 冷却过了就该发
+  assert.equal(shouldPostScore({ acc: 0.7, best: { acc: 5000, at: now - 60000 }, lastAt: now - 120000, now }).post, true)
+  // 旧最好成绩已过期：等于没有记录，0.5 也能重新上榜
+  assert.equal(shouldPostScore({ acc: 0.5, best: { acc: 9000, at: now - 25 * 3600 * 1000 }, now }).post, true)
 })

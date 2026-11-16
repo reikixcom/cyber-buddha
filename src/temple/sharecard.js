@@ -35,7 +35,7 @@ function grade(acc) {
  * 一张的结论（round/accuracy/short/beaconRound）算好了，直接用。
  * 所有字段都做上限保护：这张卡会被发出去，不能因为一个 NaN 就画出「NaN $G」。
  */
-export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealCount = 0, lastSeal = null, identity = null, online = 0, streakDays = 0, duelResult = null } = {}) {
+export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealCount = 0, lastSeal = null, identity = null, online = 0, streakDays = 0, boardRank = 0, duelResult = null } = {}) {
   const last = lastSeal && typeof lastSeal === 'object' ? lastSeal : null
   const num = (v, cap = 1e9) => {
     const n = Number(v)
@@ -58,6 +58,7 @@ export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealC
     grade: grade(num(last?.accuracy)),
     online: Math.round(num(online, 1e6)),
     streak: Math.round(num(streakDays, 1e5)),
+    boardRank: Math.round(num(boardRank, 1e5)),
     hasSeal: !!last,
     // 战报：一场对战就是一次可转发的理由，别让它只活在 toast 里
     duel: d ? {
@@ -92,6 +93,31 @@ function fitText(ctx, text, maxWidth) {
 /**
  * 画一张卡。ctx 需已按 CARD_W × CARD_H 的坐标系准备好。
  */
+/**
+ * 直接能贴的社媒文案。
+ * 传播的瓶颈往往不是链接，是「不知道该写什么」—— 给一段现成的话，
+ * 复制粘贴就能发。里面的数字全部来自这张卡，不替用户编故事。
+ */
+export function buildPostText(d, { url = 'https://cyberbuddha.ai' } = {}) {
+  const pct = Math.round((Number(d?.accuracy) || 0) * 100)
+  const head = []
+  if (d?.duel) {
+    head.push(`跟 ${d.duel.name || '同修'} 对了一炷：我 ${d.duel.mine}% / 他 ${d.duel.theirs}%（${d.duel.label}）`)
+  } else if (d?.hasSeal) {
+    const rank = d.boardRank > 0 ? `，近 24 小时榜第 ${d.boardRank}` : ''
+    head.push(`第 ${d.round} 炷敲出 ${pct}% 合拍${rank}`)
+  } else if (d?.knocks > 0) {
+    head.push(`在赛博禅寺敲了 ${d.knocks} 下木鱼，累计 ${d.merit} $GONGDE`)
+  } else {
+    head.push('赛博禅寺：敲木鱼就是出块')
+  }
+  return [
+    head[0],
+    '六十四拍跟着公开信标敲，每炷出一张谁都能复算的禅印。无账号、无服务器，规则全开源。',
+    url
+  ].join('\n')
+}
+
 export function drawShareCard(ctx, d, opts = {}) {
   const W = CARD_W
   const H = CARD_H
@@ -166,6 +192,14 @@ export function drawShareCard(ctx, d, opts = {}) {
   ctx.fillStyle = '#8aa6bb'
   ctx.font = `400 30px ${mono}`
   ctx.fillText(`法号 ${fitText(ctx, d.name, W - pad * 2 - 240)}`, pad, y)
+  // 榜上有名就写上去：这是别人没有的社交证明，比自称「敲了很多」有分量
+  if (d.boardRank > 0) {
+    ctx.textAlign = 'right'
+    ctx.fillStyle = gold
+    ctx.font = `600 26px ${mono}`
+    ctx.fillText(`近 24 小时合拍榜 第 ${d.boardRank}`, W - pad, y)
+    ctx.textAlign = 'left'
+  }
   y += 34
 
   ctx.strokeStyle = 'rgba(0, 240, 255, 0.35)'

@@ -7,6 +7,7 @@
  *   CTW1 愿单    ：愿文、悬赏、需要多少击，由愿主签名（愿 id 由内容派生，改不了）
  *   CTJ1 接单    ：我要替这条愿诵（可多人同时接，不抢单）
  *   CTD1 送达    ：我诵完了，附禅印短码作证
+ *   CTS1 成绩    ：我这一炷的合拍率，用于近 24 小时榜（只报个人最好那一炷）
  *
  * 为什么用「心跳里的累计击数」而不是每人上报一条击打记录：
  * 公告板一条消息就是一次 HTTP 请求，敲一下发一条会被限流到不可用。
@@ -27,6 +28,14 @@ export const P_PRESENCE = 'CTH1'
 export const P_WISH = 'CTW1'
 export const P_JOIN = 'CTJ1'
 export const P_DELIVER = 'CTD1'
+export const P_SCORE = 'CTS1'
+
+/**
+ * 榜的窗口：滚动 24 小时，不按自然日。
+ * 按自然日就要选一个时区，UTC 的话国内用户每天早上八点被清榜，
+ * 每个时区都不一样又没法只发一次 —— 滚动窗口对所有人都公平。
+ */
+export const SCORE_WINDOW_MS = 24 * 3600 * 1000
 
 /** 心跳间隔与判定为「还在场」的窗口：留两次丢失的余量 */
 export const HEARTBEAT_MS = 30000
@@ -54,7 +63,10 @@ export const signText = {
     `sangha.wish|${id}|${wish}|${bounty}|${need}|${at}`,
   join: ({ wishId: wid, pub, at }) => `sangha.join|${wid}|${pub}|${at}`,
   deliver: ({ wishId: wid, pub, hits, sealShort, at }) =>
-    `sangha.deliver|${wid}|${pub}|${hits}|${sealShort}|${at}`
+    `sangha.deliver|${wid}|${pub}|${hits}|${sealShort}|${at}`,
+  /** 成绩：只报合拍率与那一炷的编号，够上榜、不够冒用别人的禅印 */
+  score: ({ pub, round, acc, sealShort, at }) =>
+    `sangha.score|${pub}|${round}|${acc}|${sealShort}|${at}`
 }
 
 const clampText = (s) => String(s || '')
@@ -92,6 +104,19 @@ export function makeDeliver({ pub, sig, wishId: wid, hits = 0, sealShort = '', a
   const sec = Math.floor(at / 1000)
   const out = packRecord(P_DELIVER, b64urlEncode(JSON.stringify([1, wid, pub, Math.max(0, hits | 0), sealShort, sec, sig])))
   return { kind: 'deliver', text: out, wishId: wid, pub, hits: Math.max(0, hits | 0), sealShort, at: sec, sig }
+}
+
+/**
+ * 成绩记录：上榜用。合拍率存「万分之一」整数。
+ * 附禅印短码不是装饰：别人看到榜上的名字，可以要那张回执自己复算，
+ * 所以榜是「自报，但可抽查」——不承诺它是真的，承诺它经得起追问。
+ */
+export function makeScore({ pub, sig, round = 0, acc = 0, sealShort = '', at = Date.now() }) {
+  const sec = Math.floor(at / 1000)
+  const bp = Math.max(0, Math.min(10000, Math.round(Number(acc) || 0)))
+  const body = [1, pub, Math.max(0, round | 0), bp, sealShort, sec, sig]
+  const out = packRecord(P_SCORE, b64urlEncode(JSON.stringify(body)))
+  return { kind: 'score', text: out, pub, round: body[2], acc: bp, sealShort, at: sec, sig }
 }
 
 /* ------------------------------------------------------------------ *
@@ -148,6 +173,15 @@ export function parseSangha(text) {
     if (sealShort && !SHORT_RE.test(String(sealShort))) return null
     return { kind: 'deliver', text: s, wishId: wid, pub, hits, sealShort: sealShort || '', at, sig }
   }
+  if (s.startsWith(P_SCORE + '.')) {
+    const d = decode(s, P_SCORE, 7)
+    if (!d) return null
+    const [, pub, round, acc, sealShort, at, sig] = d.a
+    if (!PUB_RE.test(String(pub)) || !SIG_RE.test(String(sig))) return null
+    if (!isInt(round, 0, 1e7) || !isInt(acc, 0, 10000) || !isInt(at, 1, 1e11)) return null
+    if (sealShort && !SHORT_RE.test(String(sealShort))) return null
+    return { kind: 'score', text: s, pub, round, acc, sealShort: sealShort || '', at, sig }
+  }
   return null
 }
 
@@ -180,6 +214,7 @@ export function aggregate(items, opts = {}) {
   const wishes = new Map()     // id -> wish
   const joins = new Map()      // wishId -> Map(pub -> at)
   const delivers = new Map()   // wishId -> Map(pub -> deliver)
+  const scores = new Map()     // pub -> 窗口内最好的一炷
   const seenText = new Set()
 
   for (const r of list) {
@@ -201,6 +236,12 @@ export function aggregate(items, opts = {}) {
       const m = delivers.get(r.wishId)
       const prev = m.get(r.pub)
       if (!prev || r.at > prev.at) m.set(r.pub, r)
+    } else if (r.kind === 'score') {
+      // 窗口外的一律不算；同一个人只留最高那一炷，靠刷数量上不了榜
+      if (now - r.at * 1000 > SCORE_WINDOW_MS) continue
+      if (r.at * 1000 - now > 120000) continue
+      const prev = scores.get(r.pub)
+      if (!prev || r.acc > prev.acc || (r.acc === prev.acc && r.at < prev.at)) scores.set(r.pub, r)
     }
   }
 
@@ -276,15 +317,53 @@ export function aggregate(items, opts = {}) {
   /** 此刻正被诵着的击数：各人在场心跳里上报的累计值之和，实时且真实 */
   const liveHits = souls.reduce((n, s) => n + (presence.get(s.pub)?.hits || 0), 0)
 
+  // 合拍榜：同分先到者在前。只排进窗口内的成绩，过期的自然掉榜
+  const ranked = [...scores.values()].sort((a, b) => (b.acc - a.acc) || (a.at - b.at))
+  const board = ranked.slice(0, 10).map((r, i) => ({
+    rank: i + 1,
+    pub: r.pub,
+    name: shortPub(r.pub),
+    soul: soulName(r.pub),
+    acc: r.acc / 10000,
+    round: r.round,
+    at: r.at,
+    sealShort: r.sealShort,
+    mine: !!selfPub && r.pub === selfPub
+  }))
+  const myIdx = selfPub ? ranked.findIndex((r) => r.pub === selfPub) : -1
+
   return {
     online: souls.length,
     souls: souls.sort((a, b) => b.at - a.at),
     wishes: out.filter((w) => w.done || w.progress < w.need),
     all: out,
     reputation: [...rep.values()].sort((a, b) => b.delivered - a.delivered),
+    board,
+    boardTotal: ranked.length,
+    myRank: myIdx >= 0 ? myIdx + 1 : 0,
+    myBest: myIdx >= 0 ? ranked[myIdx].acc / 10000 : 0,
     dayHits,
     liveHits
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * 上榜节流：一次都上报会把公告板写额度耗光（一炷香才二十几秒），
+ * 所以只报「个人近 24 小时最好成绩的刷新」，同分与退步都不发。
+ * ------------------------------------------------------------------ */
+
+export function shouldPostScore({ acc = 0, best = null, lastAt = 0, now = Date.now(), cooldownMs = 90000 } = {}) {
+  const bp = Math.max(0, Math.min(10000, Math.round((Number(acc) || 0) * 10000)))
+  if (bp <= 0) return { post: false, bp, reason: '这一炷没有合拍' }
+  const bAcc = Math.max(0, Math.min(10000, Math.round(Number(best?.acc) || 0)))
+  const bAt = Number(best?.at) || 0
+  // 本地最好成绩已经滚出 24 小时窗口：它在榜上不存在了，谁都可以重新上一次
+  const fresh = bAt > 0 && now - bAt < SCORE_WINDOW_MS
+  if (fresh && bp <= bAcc) return { post: false, bp, reason: '没超过近 24 小时的最好成绩' }
+  if (lastAt && now - lastAt < cooldownMs) {
+    return { post: false, bp, reason: `刚报过，${Math.ceil((cooldownMs - (now - lastAt)) / 1000)} 秒后可再报` }
+  }
+  return { post: true, bp, reason: fresh ? `刷新最好成绩 ${Math.round(bAcc / 100)}% → ${Math.round(bp / 100)}%` : '首次上榜' }
 }
 
 /** 逐条验签。签名是真的才算数 —— 聚合本身不做密码学校验，避免卡住主线程 */

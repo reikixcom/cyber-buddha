@@ -5,7 +5,7 @@
  * 图里带法号与禅印短码 —— 别人可以拿短码回站里复算，截图造不了假。
  */
 import { ref, onMounted, watch, computed } from 'vue'
-import { buildShareData, drawShareCard, CARD_W, CARD_H } from '../temple/sharecard.js'
+import { buildShareData, drawShareCard, buildPostText, CARD_W, CARD_H } from '../temple/sharecard.js'
 import { verifySeal } from '../temple/seal.js'
 import { makeDuel, duelUrl } from '../temple/duel.js'
 
@@ -19,6 +19,7 @@ const props = defineProps({
   identity: { type: Object, default: null },
   online: { type: Number, default: 0 },
   streakDays: { type: Number, default: 0 },
+  boardRank: { type: Number, default: 0 },
   duelResult: { type: Object, default: null }
 })
 const emit = defineEmits(['close'])
@@ -48,6 +49,7 @@ const data = computed(() => buildShareData({
   identity: props.identity,
   online: props.online,
   streakDays: props.streakDays,
+  boardRank: props.boardRank,
   duelResult: props.duelResult
 }))
 
@@ -117,6 +119,18 @@ async function copyLink() {
   }
 }
 
+/** 复制一段能直接发的文案：多数人不是不想发，是不知道写什么 */
+async function copyPost() {
+  const origin = (typeof location !== 'undefined' ? location.origin : 'https://cyberbuddha.ai') + '/'
+  const text = buildPostText(data.value, { url: origin })
+  try {
+    await navigator.clipboard.writeText(text)
+    note.value = '文案已复制 · 粘到微博 / X / 群里就能发'
+  } catch {
+    note.value = text
+  }
+}
+
 /**
  * 下战帖：把最近一炷回执打包成一条链接。
  * 回执里写死了「第几炷 + 当日种子」，节拍表是纯函数算的 —— 对方点开就是同一张
@@ -162,6 +176,7 @@ async function copyDuel() {
         <button class="seal-primary clickable" :disabled="busy" @click="shareImage">分享图片</button>
         <button class="sc-duel clickable" :disabled="busy" @click="copyDuel">下战帖 · 同一炷</button>
         <button class="seal-ghost clickable" :disabled="busy" @click="download">保存图片</button>
+        <button class="seal-ghost clickable" @click="copyPost">复制文案</button>
         <button class="seal-ghost clickable" @click="copyLink">复制链接</button>
       </div>
 
