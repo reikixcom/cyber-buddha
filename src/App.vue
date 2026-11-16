@@ -23,6 +23,11 @@ import {
   assemblyAt, fmtCountdown, normalizeStreak,
   streakUpdate, streakMark, freshStreak, verseOfDay, DAILY_VERSES
 } from './temple/dharma.js'
+import {
+  makeDuel, parseDuel, duelSetup, compareDuel,
+  duelVerdictLine, duelUrl
+} from './temple/duel.js'
+import { bookOf } from './temple/token.js'
 
 const RANKS = [
   { min: 0, name: '初入山门' },
@@ -58,6 +63,12 @@ const taskDone = ref({ incense: false, bow: false, fish: false, bell: false })
 const daily = ref(freshDaily())
 /** 连修：昨天来过就 +1，断一天归零；只做身份，不额外发功德 */
 const streak = ref(freshStreak())
+/**
+ * 发行台账：累计修行所得与累计支出。
+ * 余额会被花掉，历史不会 —— 这三个数才说得清「币从哪来、到哪去」。
+ */
+const issued = ref(0)
+const sentOut = ref(0)
 /** 每秒走一格，法会倒计时与「是否在场内」都由它驱动 */
 const nowTick = ref(Date.now())
 const asm = computed(() => assemblyAt(nowTick.value))
@@ -68,6 +79,10 @@ const hovered = ref(null)
 const activeId = ref(null)
 /** 节奏台收起来：想安静看寺就收起，要敲时再展开；只影响界面，不影响结算 */
 const deckOpen = ref(true)
+/** 收到的战帖（别人的回执）与应战后的对比结果 —— 传播全靠这两个 */
+const duel = ref(null)
+const duelResult = ref(null)
+let activeDuel = null
 
 let engine = null
 let seq = 0
@@ -132,6 +147,8 @@ function save() {
       taskDone: taskDone.value,
       daily: daily.value,
       streak: streak.value,
+      issued: issued.value,
+      sentOut: sentOut.value,
       muted: muted.value,
       quality: quality.value,
       deckOpen: deckOpen.value,
@@ -153,6 +170,9 @@ function load() {
     taskDone.value = { ...taskDone.value, ...(d.taskDone || {}) }
     daily.value = normalizeDaily(d.daily)
     streak.value = normalizeStreak(d.streak)
+    // 旧存档没有台账：用现有余额兜底，别让老玩家看到「修行所得 0」
+    issued.value = Math.max(Number(d.issued) || 0, merit.value)
+    sentOut.value = Math.max(0, Number(d.sentOut) || 0)
     muted.value = !!d.muted
     quality.value = d.quality === 'low' ? 'low' : 'high'
     if (d.deckOpen === false) deckOpen.value = false
@@ -170,7 +190,12 @@ function addBalance(n, kind = 'transfer') {
   const boosted = n > 0 && kind === 'emit' ? Math.round(n * asm.value.mult) : n
   const credited = n > 0 && kind === 'emit' ? emitCredit(daily.value.earned, boosted) : boosted
   if (n > 0 && kind === 'emit') daily.value.earned += credited
-  merit.value = Math.max(0, merit.value + credited)
+  const before = merit.value
+  merit.value = Math.max(0, before + credited)
+  // 台账按「实际动了多少」记：余额不足以扣满时，支出只记真扣掉的那部分
+  const delta = merit.value - before
+  if (delta > 0 && kind === 'emit') issued.value += delta
+  else if (delta < 0) sentOut.value += -delta
   save()
   return credited
 }
@@ -186,7 +211,18 @@ const practice = usePractice({
   addBalance,
   pushLog,
   addToast,
-  onSeal: (seal) => ledger.claim(seal.text),
+  // 出印即认领，同时结算战帖：应战那一炷出印的瞬间就是分胜负的时刻
+  onSeal: (seal) => {
+    ledger.claim(seal.text)
+    if (!activeDuel || !practice.duelPlaying) return
+    const who = activeDuel.name || '对手'
+    const cmp = compareDuel(activeDuel.seal, seal)
+    duelResult.value = { ...cmp, name: activeDuel.name || '', short: activeDuel.short }
+    activeDuel = null
+    pushLog(`战报 · ${duelVerdictLine(cmp)} · 对手 ${who}`, true)
+    addToast(`战报 · ${cmp.label}`, `${Math.round(cmp.mineAccuracy * 100)}% 对 ${Math.round(cmp.theirsAccuracy * 100)}%${cmp.same ? '' : ' · 不是同一炷，仅供参考'}`)
+    if (cmp.verdict === 'win') engine?.celebrate()
+  },
   onKnockVisual: (grade) => {
     engine?.knock(grade)
     // 节奏敲击也算「总敲击」：分享卡上的数字不能只统计 3D 里的叩击
@@ -226,6 +262,15 @@ const sangha = useSangha({
     if (type === 'pull' && payload?.added) pushLog(`公告板收到 ${payload.added} 条共修消息`)
   }
 })
+
+/** 香火簿的三个数：修行所得、当前余额、已支出 */
+const book = computed(() => bookOf({
+  issued: issued.value,
+  balance: merit.value,
+  sent: sentOut.value,
+  tickets: ledger.myTickets.length,
+  seals: practice.seals.length
+}))
 
 broadcastToSangha = async (e) => {
   if (!e || !sangha.live) return
@@ -421,6 +466,58 @@ function shareTemple() {
   shareOpen.value = true
 }
 
+/* ------------------------------------------------------------------ *
+ * 战帖：一条链接，同一张节拍表
+ * ------------------------------------------------------------------ *
+ * 一张禅印里已经有「第几炷 + 当日种子」，节拍表是纯函数算出来的，
+ * 所以对方拿着你的回执就能重建一模一样的六十四拍 —— 不需要房间、不需要配对、
+ * 不需要服务器。这是这座寺最便宜的传播装置：不用请人来玩，直接请你对一炷。
+ */
+
+/** 地址栏里带战帖就当场解析；解析完抹掉参数，免得刷新重复触发 */
+function readDuelLink() {
+  try {
+    const url = new URL(location.href)
+    let code = url.searchParams.get('duel') || ''
+    if (!code && url.hash.startsWith('#duel=')) code = decodeURIComponent(url.hash.slice(6))
+    if (!code) return
+    const d = parseDuel(code)
+    if (d?.ok) {
+      duel.value = d
+      pushLog(`收到战帖 · 第 ${d.seal.round} 炷 · 对方合拍 ${Math.round(d.seal.accuracy * 100)}%`, true)
+      // 标签页标题也换成战帖：微信/Telegram 里点开时，第一眼就知道自己被点名了
+      try { document.title = `战帖 · 第 ${d.seal.round} 炷 · 赛博禅寺` } catch { /* 忽略 */ }
+    } else {
+      pushLog('战帖没读出来 —— 链接可能被聊天软件截断，让对方重发完整一条')
+    }
+    url.searchParams.delete('duel')
+    url.hash = ''
+    history.replaceState(null, '', url.toString())
+  } catch { /* file:// 或隐私模式下忽略 */ }
+}
+
+/** 应战：用对方的 round + daySeed 重建同一张节拍表，敲完这一炷立刻出对比 */
+function acceptDuel() {
+  const d = duel.value
+  if (!d) return
+  const setup = duelSetup(d)
+  if (!practice.startDuel(setup)) {
+    addToast('战帖打不开', '回执里的第几炷或种子不合法')
+    return
+  }
+  activeDuel = d
+  duel.value = null
+  started.value = true
+  engine?.unlockAudio()
+  addToast('应战', `第 ${setup.round} 炷 · 与 ${d.name || '对手'} 同一张节拍表`)
+  pushLog(`应战 · 第 ${setup.round} 炷 · ${d.name || '对手'} 已交出 ${Math.round(setup.accuracy * 100)}%`, true)
+}
+
+function dismissDuel() {
+  duel.value = null
+  pushLog('战帖已收起 · 想应战时重开原链接即可')
+}
+
 function resetAll() {
   merit.value = 0
   bestCombo.value = 0
@@ -428,6 +525,10 @@ function resetAll() {
   combo.value = 0
   taskDone.value = { incense: false, bow: false, fish: false, bell: false }
   daily.value = freshDaily()
+  issued.value = 0
+  sentOut.value = 0
+  duelResult.value = null
+  duel.value = null
   streak.value = streakUpdate(freshStreak(), dayKey())
   practice.resetMarket()
   ledger.reset()
@@ -483,6 +584,7 @@ const onVisibility = () => { if (document.hidden) save() }
 
 onMounted(() => {
   load()
+  readDuelLink()
   if (practice.restoreMarket(pendingPracticeSave)) {
     pushLog('本机存档已续上 · 心愿与香火进度仍在', true)
   }
@@ -585,7 +687,7 @@ onBeforeUnmount(() => {
       @toggle-open="deckOpen = !deckOpen"
     />
 
-    <SanghaPanel v-if="started" :p="practice" :l="ledger" :s="sangha" />
+    <SanghaPanel v-if="started" :p="practice" :l="ledger" :s="sangha" :book="book" />
     <Joystick v-if="started" @move="onJoy" />
 
     <StartScreen
@@ -597,7 +699,10 @@ onBeforeUnmount(() => {
       :streak="streak"
       :assembly="asm"
       :verse="verse"
+      :duel="duel"
       @enter="enter"
+      @duel="acceptDuel"
+      @dismiss-duel="dismissDuel"
       @share="shareTemple"
       @reset="resetAll"
     />
@@ -616,6 +721,7 @@ onBeforeUnmount(() => {
       :identity="ledger.identity"
       :online="sangha.online"
       :streak-days="streak.days"
+      :duel-result="duelResult"
       @close="shareOpen = false"
     />
 

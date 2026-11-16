@@ -613,6 +613,44 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 0 24px rgba(255, 190, 80, 0.22);
 }
 .today-verse { font-size: 12px; letter-spacing: 0.18em; color: #5f7d92; }
+
+/* 战帖：别人点名请你对一炷。首屏最重要的一块，压过玩法说明 */
+.start-duel {
+  margin: 20px auto 0; max-width: 560px; text-align: left;
+  padding: 16px 18px 15px; border-radius: 12px;
+  border: 1px solid rgba(255, 204, 102, 0.5);
+  background: linear-gradient(150deg, rgba(255, 204, 102, 0.10), rgba(6, 12, 22, 0.74) 62%);
+  box-shadow: 0 0 34px rgba(255, 176, 60, 0.13), inset 0 0 30px rgba(255, 204, 102, 0.05);
+}
+.duel-head { display: flex; align-items: center; gap: 10px; }
+.duel-tag {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.3em;
+  color: #1a1005; background: var(--gold); padding: 3px 8px 3px 11px; border-radius: 4px;
+}
+.duel-from { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: #ffd98a; }
+.duel-main { margin-top: 12px; font-size: 14px; line-height: 1.85; letter-spacing: 0.04em; color: #d8eef7; }
+.duel-main b { color: #ffffff; }
+.duel-main .duel-pct {
+  font-family: var(--font-mono); font-size: 24px; color: var(--gold);
+  padding: 0 2px; text-shadow: 0 0 18px rgba(255, 190, 80, 0.45);
+}
+.duel-note { margin-top: 8px; font-size: 12px; line-height: 1.7; color: #ffd98a; }
+.duel-sub { margin-top: 8px; font-size: 10px; line-height: 1.8; color: #7d94a6; }
+.duel-actions { margin-top: 14px; display: flex; align-items: center; gap: 12px; }
+.duel-go {
+  min-height: 42px; padding: 0 30px; border-radius: 8px; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0.3em;
+  color: #1a1005; background: linear-gradient(180deg, #ffe0a0, var(--gold));
+  border: 1px solid rgba(255, 226, 166, 0.85);
+  box-shadow: 0 0 22px rgba(255, 190, 80, 0.34);
+}
+.duel-go:hover { filter: brightness(1.08); }
+.duel-skip {
+  padding: 8px 4px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: 10px; letter-spacing: 0.1em; color: #93aec0;
+  text-decoration: underline; text-underline-offset: 4px;
+}
+.duel-skip:hover { color: #a9c2d3; }
 .start-foot-stats { margin-top: 7px; color: #3d5262; }
 .start-reset {
   margin-left: 10px; padding: 0; border: 0; background: none; cursor: pointer;
@@ -650,6 +688,14 @@ button { font-family: inherit; cursor: pointer; }
   .btn-main { min-width: 190px; padding: 12px 26px; font-size: 14px; }
   .start-guide { margin-top: 16px; gap: 14px; }
   .start-foot { margin-top: 14px; }
+  /* 战帖卡在矮屏要压住，它替代了三条玩法说明，高度必须大致相当 */
+  .start-duel { margin-top: 12px; padding: 11px 13px 11px; }
+  .duel-main { margin-top: 8px; font-size: 13px; line-height: 1.7; }
+  .duel-main .duel-pct { font-size: 20px; }
+  .duel-note { margin-top: 6px; font-size: 11px; }
+  .duel-sub { margin-top: 5px; font-size: 9px; line-height: 1.6; }
+  .duel-actions { margin-top: 10px; }
+  .duel-go { min-height: 38px; padding: 0 24px; font-size: 12px; }
 }
 
 .start-actions { margin-top: 34px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
@@ -1389,7 +1435,7 @@ button { font-family: inherit; cursor: pointer; }
 .seal-intro {
   margin: 12px 0 0; font-size: 11px; line-height: 1.8; color: #9dc4d6;
 }
-.seal-tabs { display: flex; gap: 6px; margin-top: 14px; border-bottom: 1px solid rgba(0, 240, 255, 0.2); }
+.seal-tabs { display: flex; gap: 6px; margin-top: 14px; border-bottom: 1px solid rgba(0, 240, 255, 0.2); flex-wrap: wrap; }
 .seal-tab {
   padding: 7px 13px; font-size: 11px; letter-spacing: 0.08em;
   color: #7e9cad; background: transparent; border: 1px solid transparent; border-bottom: 0;
@@ -1400,6 +1446,41 @@ button { font-family: inherit; cursor: pointer; }
   border-color: rgba(0, 240, 255, 0.32);
 }
 .seal-body { padding-top: 14px; }
+
+/* 香火簿：三个数 + 一条几乎看不见的进度条 —— 后者才是重点 */
+.book-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.book-stat {
+  padding: 9px 11px 10px; border-radius: 8px;
+  border: 1px solid rgba(0, 240, 255, 0.16);
+  background: linear-gradient(160deg, rgba(0, 240, 255, 0.05), rgba(6, 12, 22, 0.5));
+}
+.book-stat span {
+  display: block; font-family: var(--font-mono); font-size: 8px;
+  letter-spacing: 0.14em; color: #6e8ba3;
+}
+.book-stat b {
+  display: block; margin-top: 5px; font-family: var(--font-mono);
+  font-size: 19px; font-weight: 600; color: #eafcff;
+}
+.book-stat b.c-gold { color: var(--gold); }
+.book-cap { margin-top: 12px; }
+.book-cap-line { font-size: 10px; color: #8399ab; letter-spacing: 0.04em; }
+.book-cap-line b { color: #d8eef7; font-family: var(--font-mono); }
+.book-cap-line span { color: #6e8ba3; }
+.book-bar {
+  position: relative; height: 4px; margin: 7px 0 7px;
+  border-radius: 2px; background: rgba(110, 139, 163, 0.18); overflow: hidden;
+}
+.book-bar i {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, rgba(255, 204, 102, 0.5), var(--gold));
+}
+.book-rules {
+  margin: 8px 0 0; padding-left: 16px;
+  font-size: 10px; line-height: 1.85; color: #8fa9ba;
+}
+.book-rules li { margin-bottom: 7px; }
+.book-rules li::marker { color: rgba(255, 204, 102, 0.6); }
 .seal-chain {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 7px 10px; margin-bottom: 10px; font-size: 10px;
@@ -1574,11 +1655,21 @@ button { font-family: inherit; cursor: pointer; }
 }
 .seal-ghost:hover { background: rgba(0, 240, 255, 0.16); }
 .seal-ghost:disabled { opacity: 0.5; cursor: default; }
+/* 下战帖：分享卡里唯一「能动」的动作，给金色，别和保存图片混在一起 */
+.sc-duel {
+  padding: 6px 15px; font-size: 11px; letter-spacing: 0.1em; cursor: pointer;
+  font-family: inherit; font-weight: 600;
+  color: #1a1005; background: linear-gradient(180deg, #ffe0a0, var(--gold));
+  border: 1px solid rgba(255, 226, 166, 0.8);
+  box-shadow: 0 0 18px rgba(255, 190, 80, 0.26);
+}
+.sc-duel:hover { filter: brightness(1.07); }
+.sc-duel:disabled { opacity: 0.55; cursor: default; }
 .sc-note { margin: 0; font-size: 9px; line-height: 1.7; color: #6e8ba3; }
 .sc-flash { margin: 0; font-size: 10px; color: var(--gold); word-break: break-all; }
 @media (max-width: 860px) {
   .sc-modal { width: 100%; max-height: 96vh; padding: 12px; }
   .sc-canvas { max-height: 50vh; }
   .sc-actions { gap: 6px; }
-  .sc-actions .seal-primary, .sc-actions .seal-ghost { flex: 1 1 30%; padding: 6px 8px; font-size: 10px; }
+  .sc-actions .seal-primary, .sc-actions .seal-ghost, .sc-actions .sc-duel { flex: 1 1 30%; padding: 6px 8px; font-size: 10px; }
 }

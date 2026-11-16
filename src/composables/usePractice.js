@@ -142,6 +142,14 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   const netLive = ref(false)
   const netOnline = ref(0)
 
+  /**
+   * 应战：用别人回执里的 round + daySeed 重建同一张节拍表，敲完这一炷就恢复
+   * 自己的进度。round 是自己的计数器，不能真的被别人的数字顶掉。
+   */
+  let duelQueue = null
+  let roundBeforeDuel = 0
+  const duelPlaying = ref(false)
+
   let used = new Set()
   let stickStart = 0
   let raf = 0
@@ -316,9 +324,24 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
   }
 
   function nextStick() {
-    round.value += 1
-    stickSeed = daySeed
-    stickBeacon = { day: beacon.value.day, round: beacon.value.round }
+    if (duelQueue) {
+      const d = duelQueue
+      duelQueue = null
+      roundBeforeDuel = round.value
+      duelPlaying.value = true
+      round.value = d.round
+      stickSeed = d.daySeed
+      stickBeacon = d.beacon || null
+    } else {
+      // 应战那一炷出完印就交还主动权：倍率、稀释与后续进度都回到自己的账上
+      if (duelPlaying.value) {
+        duelPlaying.value = false
+        round.value = roundBeforeDuel
+      }
+      round.value += 1
+      stickSeed = daySeed
+      stickBeacon = { day: beacon.value.day, round: beacon.value.round }
+    }
     pattern.value = makePattern(seedFrom(round.value, stickSeed))
     marks.value = {}
     used = new Set()
@@ -735,6 +758,18 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     pushLog('共修已开始 · 空格 / 点轨道 / 点「敲」跟着光点落拍', true)
   }
 
+  /**
+   * 应战入口：把战帖里的题面排进下一炷。
+   * 正在敲的时候不打断 —— 半炷换节拍表等于把人手里的成绩作废。
+   */
+  function startDuel(setup) {
+    if (!setup || !Number.isInteger(setup.round) || setup.round < 1 || !Number.isFinite(setup.daySeed)) return false
+    duelQueue = { round: setup.round, daySeed: setup.daySeed >>> 0, beacon: setup.beacon || null }
+    if (!running.value) start()
+    else pushLog(`应战已排入 · 本炷结束即开第 ${setup.round} 炷（同一张节拍表）`, true)
+    return true
+  }
+
   /** 真暂停：冻结本炷进度、结算与长明灯；继续时把暂停时长补回起始时刻，从原来那一拍接着敲 */
   function toggle() {
     if (running.value) {
@@ -787,6 +822,7 @@ export function usePractice({ merit, addBalance, pushLog, addToast, onKnockVisua
     bountyMin: BOUNTY_MIN, bountyMax: BOUNTY_MAX, bountyTiers: BOUNTY_TIERS,
     stickLimit: WISH_STICK_LIMIT, needFor, shareOf,
     knock, takeWish, postWish, cancelWish, boostWish, start, toggle,
+    startDuel, duelPlaying,
     restoreMarket, resetMarket
   })
 }

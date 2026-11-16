@@ -8,9 +8,13 @@ defineProps({
   live: { type: Boolean, default: false },
   streak: { type: Object, default: () => ({ days: 0, best: 0 }) },
   assembly: { type: Object, default: () => ({ active: false }) },
-  verse: { type: String, default: '' }
+  verse: { type: String, default: '' },
+  /** 别人发来的战帖：有它就把首屏让给这一次对决，别让人先读三条玩法说明 */
+  duel: { type: Object, default: null }
 })
-const emit = defineEmits(['enter', 'reset', 'share'])
+const emit = defineEmits(['enter', 'reset', 'share', 'duel', 'dismiss-duel'])
+
+const pct = (n) => `${Math.round(Math.max(0, Math.min(1, Number(n) || 0)) * 100)}%`
 </script>
 
 <template>
@@ -26,7 +30,28 @@ const emit = defineEmits(['enter', 'reset', 'share'])
           敲的人赚功德，许愿的人买「被看见」。
         </p>
 
-        <div class="start-steps">
+        <!-- 收到战帖：这是首屏唯一该讲的事。玩法说明让位，别把应战按钮挤出第一屏 -->
+        <div v-if="duel" class="start-duel">
+          <div class="duel-head">
+            <span class="duel-tag">战 帖</span>
+            <span class="duel-from">{{ duel.name || '一位同修' }}</span>
+          </div>
+          <div class="duel-main">
+            在第 <b>{{ duel.seal.round }}</b> 炷敲出
+            <b class="duel-pct">{{ pct(duel.seal.accuracy) }}</b>
+            合拍率 · 功德 {{ duel.seal.reward }} $G
+          </div>
+          <div v-if="duel.note" class="duel-note">「{{ duel.note }}」</div>
+          <div class="duel-sub">
+            回执里的第几炷与当日种子都是死的 —— 点开就是同一张六十四拍，成绩当场能复算
+          </div>
+          <div class="duel-actions">
+            <button class="duel-go clickable" @click="emit('duel')">应 战</button>
+            <button class="duel-skip clickable" @click="emit('dismiss-duel')">先逛逛</button>
+          </div>
+        </div>
+
+        <div v-else class="start-steps">
           <div class="start-step">
             <b>01</b>
             <h3>跟着节拍声敲</h3>
@@ -57,7 +82,7 @@ const emit = defineEmits(['enter', 'reset', 'share'])
           <span class="today-verse">今日一偈 · {{ verse }}</span>
         </div>
 
-        <div class="start-actions">
+        <div v-if="!duel" class="start-actions">
           <button class="btn-main" @click="emit('enter')">进 入 山 门</button>
         </div>
 

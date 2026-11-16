@@ -7,7 +7,9 @@ import SealPanel from './SealPanel.vue'
 const props = defineProps({
   p: { type: Object, required: true },
   l: { type: Object, required: true },
-  s: { type: Object, default: null }
+  s: { type: Object, default: null },
+  /** 发行台账：传给禅印面板的「香火簿」 */
+  book: { type: Object, default: null }
 })
 // 窄屏默认收起心愿板，给节奏台和 3D 场景让出空间；桌面端 CSS 忽略此状态
 const collapsed = ref(true)
@@ -219,5 +221,5 @@ function wishState(w) {
     </div>
   </Transition>
 
-  <SealPanel :p="p" :l="l" />
+  <SealPanel :p="p" :l="l" :book="book || undefined" />
 </template>

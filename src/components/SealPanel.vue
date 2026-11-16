@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { verifySeal, verifyChain, packLedger, unpackLedger } from '../temple/seal.js'
 import { nameOf } from '../temple/ledger.js'
+import { packSnapshot, unpackSnapshot, mergeSnapshots, mergeLine, TOKEN_RULES } from '../temple/token.js'
 import { snapshotPractice, sanitizePracticeSave, STORE_KEY } from '../temple/save.js'
 import {
   fetchDayBeacon, checkSealBeacon, beaconPublicUrl,
@@ -10,7 +11,9 @@ import {
 
 const props = defineProps({
   p: { type: Object, required: true },
-  l: { type: Object, required: true }
+  l: { type: Object, required: true },
+  /** 发行台账：修行所得 / 当前余额 / 已支出，由 App 的 addBalance 累计 */
+  book: { type: Object, default: () => ({ issued: 0, balance: 0, sent: 0, cap: 0, pctOfCap: 0 }) }
 })
 
 const tab = ref('seals')
@@ -24,6 +27,51 @@ const importText = ref('')
 const ledgerPreview = ref(null)
 const ledgerError = ref('')
 const armed = ref(false)
+
+/* ---------------- 香火簿 ---------------- */
+const snapText = ref('')
+const mergeInput = ref('')
+const mergeResult = ref(null)
+
+const formatCap = (n) => Number(n || 0).toLocaleString()
+const pctText = (x) => {
+  const p = Math.max(0, Math.min(1, Number(x) || 0)) * 100
+  return p >= 0.01 ? `${p.toFixed(2)}%` : `${p.toFixed(4)}%`
+}
+/** 比例小到像素级也要画出来一根线，否则进度条永远是空的，看着像坏了 */
+const barWidth = (x) => `${Math.max(0.8, Math.min(100, (Number(x) || 0) * 100))}%`
+
+/**
+ * 持仓快照要现算：余额、票、时间三样都在变，
+ * 用 computed 缓存反而会把「刚才那一笔」漏掉。
+ */
+function buildSnapshot() {
+  const id = props.l.identity
+  if (!id?.pub) return null
+  return packSnapshot({
+    pub: id.pub,
+    name: id.name || '',
+    balance: props.book.balance,
+    issued: props.book.issued,
+    sent: props.book.sent,
+    tickets: props.l.myTickets.map((t) => ({ t: t.short, a: t.reward })),
+    at: Date.now()
+  })
+}
+
+async function copySnapshot() {
+  const s = buildSnapshot()
+  if (!s) { snapText.value = ''; flash('还没有法号，刷新一次页面再试'); return }
+  snapText.value = s.text
+  await copy(s.text, '持仓快照')
+}
+
+function doMerge() {
+  const list = String(mergeInput.value || '').split(/\s+/).map((x) => x.trim()).filter(Boolean)
+  if (!list.length) { mergeResult.value = null; flash('先粘贴至少一条 CTA1 快照'); return }
+  mergeResult.value = mergeSnapshots(list)
+}
+
 
 /* ---------------- 功德票 ---------------- */
 const chargeFor = ref('')
@@ -322,6 +370,7 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
           <button class="seal-tab clickable" :class="{ on: tab === 'verify' }" @click="tab = 'verify'">验签</button>
           <button class="seal-tab clickable" :class="{ on: tab === 'notes' }" @click="tab = 'notes'">功德票 · {{ myNotes.length }}</button>
           <button class="seal-tab clickable" :class="{ on: tab === 'ledger' }" @click="tab = 'ledger'">账本搬家</button>
+          <button class="seal-tab clickable" :class="{ on: tab === 'book' }" @click="tab = 'book'">香火簿</button>
         </div>
 
         <!-- 本机回执 -->
@@ -580,6 +629,73 @@ watch(importText, () => { armed.value = false; ledgerPreview.value = null; ledge
             <b class="note-warn">功德票要另外搬：</b>「功德票 → 整本流水」的流水包 + 「身份备份」两样一起带走，
             才算把票也搬过去；只搬这份账本，票的归属会跟着旧法号留在旧设备上。
           </div>
+        </div>
+
+        <!-- 香火簿：币这件事要能被数清楚，才不是一句口号 -->
+        <div v-if="tab === 'book'" class="seal-body">
+          <div class="book-stats">
+            <div class="book-stat">
+              <span>累计修行所得</span>
+              <b>{{ book.issued }}</b>
+            </div>
+            <div class="book-stat">
+              <span>当前余额</span>
+              <b class="c-gold">{{ book.balance }}</b>
+            </div>
+            <div class="book-stat">
+              <span>已支出</span>
+              <b>{{ book.sent }}</b>
+            </div>
+          </div>
+          <div class="book-cap">
+            <div class="book-cap-line">
+              协议总量上限 <b>{{ formatCap(book.cap) }}</b> $G
+              <span>· 你占 {{ pctText(book.pctOfCap) }}</span>
+            </div>
+            <div class="book-bar"><i :style="{ width: barWidth(book.pctOfCap) }"></i></div>
+            <div class="seal-hint">
+              余额占上限的比例小到看不见才是正常的 —— 它说明这套账里没人能印钱。
+            </div>
+          </div>
+
+          <div class="seal-section-title">持仓快照 · 谁要发币，名单只能照这个来</div>
+          <div class="seal-actions">
+            <button class="seal-primary clickable" @click="copySnapshot">复制我的快照</button>
+            <span class="seal-hint">CTA1 · 法号指纹 + 余额 + 票号，不含私钥</span>
+          </div>
+          <textarea
+            v-if="snapText" class="seal-textarea clickable mono" rows="3" readonly
+            :value="snapText" @focus="$event.target.select()"
+          ></textarea>
+
+          <div class="seal-section-title">合并快照 · 出一份可核对的空投名单</div>
+          <textarea
+            v-model="mergeInput" class="seal-textarea clickable" rows="3"
+            placeholder="粘贴多行 CTA1 快照，一行一个法号"
+          ></textarea>
+          <div class="seal-actions">
+            <button class="seal-ghost clickable" @click="doMerge">合并并出摘要</button>
+            <span class="seal-hint">同一法号多份时取最新一份，重复导出不会灌水</span>
+          </div>
+          <div v-if="mergeResult" class="seal-result" :class="mergeResult.ok ? 'ok' : 'bad'">
+            <div class="seal-result-title">
+              {{ mergeResult.ok ? '✓' : '✕' }} {{ mergeLine(mergeResult) }}
+            </div>
+            <div v-if="mergeResult.ok" class="seal-detail">
+              <span>合计持仓 <b>{{ mergeResult.totalBalance }} $G</b></span>
+              <span>票 <b>{{ mergeResult.totalTickets }}</b> 张</span>
+              <span>摘要 <b class="mono">{{ mergeResult.digest }}</b></span>
+            </div>
+            <div v-for="h in mergeResult.holders.slice(0, 6)" :key="h.pub" class="seal-detail">
+              <span>{{ h.name || nameOf(h.pub) }}</span>
+              <span><b>{{ h.balance }}</b> $G · {{ h.tickets.length }} 张票</span>
+            </div>
+          </div>
+
+          <div class="seal-section-title">代币规则 · 写死在前端常量里</div>
+          <ul class="book-rules">
+            <li v-for="(r, i) in TOKEN_RULES" :key="i">{{ r }}</li>
+          </ul>
         </div>
 
         <div class="seal-foot">

@@ -344,6 +344,37 @@ export function shortOf(text) {
   return parts.length === 3 && /^[0-9a-f]{16}$/.test(parts[2]) ? parts[2] : ''
 }
 
+/**
+ * 取出回执的字段数组，用于「只带字段、不带二次编码」的转发（战帖就是这么压缩的）。
+ * 注意：解出来的数组不可信，用它重建回执之后仍要走 verifySeal 复算。
+ */
+export function payloadOf(text) {
+  const u = unpack(text, SEAL_PREFIX)
+  if (!u || u.decoded === null) return null
+  try {
+    const a = JSON.parse(u.decoded)
+    if (!Array.isArray(a)) return null
+    const v = a[0]
+    const len = a.length
+    if (!((v === 1 && len === 11) || (v === 2 && len === 13))) return null
+    return a
+  } catch { return null }
+}
+
+/**
+ * 由字段数组重建回执文本。
+ * 校验码是按内容现算的 —— 也就是说这一步不做背书，真假仍由 verifySeal 复算决定。
+ */
+export function sealTextFromPayload(payload) {
+  if (!Array.isArray(payload)) return null
+  const v = payload[0]
+  const len = payload.length
+  if (!((v === 1 && len === 11) || (v === 2 && len === 13))) return null
+  try {
+    return pack(SEAL_PREFIX, b64encode(JSON.stringify(payload)))
+  } catch { return null }
+}
+
 /* ------------------------------------------------------------------ *
  * 账本：把整份本机存档打包成可复制的一行文本，用于换设备续修。
  * 同样只防传输损坏，不防自己改存档 —— 原型本来就没有服务端。

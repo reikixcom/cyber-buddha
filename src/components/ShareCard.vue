@@ -7,6 +7,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { buildShareData, drawShareCard, CARD_W, CARD_H } from '../temple/sharecard.js'
 import { verifySeal } from '../temple/seal.js'
+import { makeDuel, duelUrl } from '../temple/duel.js'
 
 const props = defineProps({
   merit: { type: Number, default: 0 },
@@ -17,7 +18,8 @@ const props = defineProps({
   seals: { type: Array, default: () => [] },
   identity: { type: Object, default: null },
   online: { type: Number, default: 0 },
-  streakDays: { type: Number, default: 0 }
+  streakDays: { type: Number, default: 0 },
+  duelResult: { type: Object, default: null }
 })
 const emit = defineEmits(['close'])
 
@@ -45,7 +47,8 @@ const data = computed(() => buildShareData({
   lastSeal: last.value,
   identity: props.identity,
   online: props.online,
-  streakDays: props.streakDays
+  streakDays: props.streakDays,
+  duelResult: props.duelResult
 }))
 
 function paint() {
@@ -113,6 +116,34 @@ async function copyLink() {
     note.value = url
   }
 }
+
+/**
+ * 下战帖：把最近一炷回执打包成一条链接。
+ * 回执里写死了「第几炷 + 当日种子」，节拍表是纯函数算的 —— 对方点开就是同一张
+ * 六十四拍，不需要房间、配对或服务器。战帖比分享图强的地方就在这里：图只能看，
+ * 链接能按。
+ */
+async function copyDuel() {
+  const s = last.value
+  if (!s?.text) {
+    note.value = '先敲满一炷，才有能被复算的回执'
+    return
+  }
+  const d = makeDuel({ sealText: s.text, name: data.value.name })
+  if (!d) {
+    note.value = '战帖生成失败：这张回执可能不完整，再敲一炷试试'
+    return
+  }
+  const origin = typeof location !== 'undefined' ? location.origin : 'https://cyberbuddha.ai'
+  const url = duelUrl(d.text, origin)
+  const text = `我在赛博禅寺第 ${s.round} 炷敲出 ${Math.round(s.accuracy * 100)}% 合拍率。同一张六十四拍，点开就是同一炷，成绩当场能复算：${url}`
+  try {
+    await navigator.clipboard.writeText(text)
+    note.value = '战帖已复制 · 贴到群里就是一条可点的链接'
+  } catch {
+    note.value = url
+  }
+}
 </script>
 
 <template>
@@ -129,13 +160,15 @@ async function copyLink() {
 
       <div class="sc-actions">
         <button class="seal-primary clickable" :disabled="busy" @click="shareImage">分享图片</button>
+        <button class="sc-duel clickable" :disabled="busy" @click="copyDuel">下战帖 · 同一炷</button>
         <button class="seal-ghost clickable" :disabled="busy" @click="download">保存图片</button>
         <button class="seal-ghost clickable" @click="copyLink">复制链接</button>
       </div>
 
       <p class="sc-note">
-        卡上只有法号、功德与禅印短码 —— 不含私钥。短码能让别人在站内复算这一炷的判定，
-        所以这张图发出去是「可核对」的，而不是一张谁都能改的截图。
+        战帖这条链接里装着最近一炷的回执：第几炷、当日种子、六十四拍判定。
+        对方点开就重建同一张节拍表 —— 一题两答，谁也没法事后改分数。
+        卡上只有法号、功德与禅印短码，不含私钥。
       </p>
       <p v-if="note" class="sc-flash">{{ note }}</p>
     </div>

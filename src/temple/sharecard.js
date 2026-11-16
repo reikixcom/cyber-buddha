@@ -35,12 +35,13 @@ function grade(acc) {
  * 一张的结论（round/accuracy/short/beaconRound）算好了，直接用。
  * 所有字段都做上限保护：这张卡会被发出去，不能因为一个 NaN 就画出「NaN $G」。
  */
-export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealCount = 0, lastSeal = null, identity = null, online = 0, streakDays = 0 } = {}) {
+export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealCount = 0, lastSeal = null, identity = null, online = 0, streakDays = 0, duelResult = null } = {}) {
   const last = lastSeal && typeof lastSeal === 'object' ? lastSeal : null
   const num = (v, cap = 1e9) => {
     const n = Number(v)
     return Number.isFinite(n) ? Math.max(0, Math.min(cap, n)) : 0
   }
+  const d = duelResult && duelResult.ok ? duelResult : null
   return {
     name: identity?.name || '#未署名',
     merit: Math.round(num(merit)),
@@ -57,7 +58,16 @@ export function buildShareData({ merit = 0, bestCombo = 0, knockCount = 0, sealC
     grade: grade(num(last?.accuracy)),
     online: Math.round(num(online, 1e6)),
     streak: Math.round(num(streakDays, 1e5)),
-    hasSeal: !!last
+    hasSeal: !!last,
+    // 战报：一场对战就是一次可转发的理由，别让它只活在 toast 里
+    duel: d ? {
+      name: String(d.name || '').slice(0, 20),
+      label: String(d.label || '').slice(0, 8),
+      mine: Math.round(Math.min(1, num(d.mineAccuracy)) * 100),
+      theirs: Math.round(Math.min(1, num(d.theirsAccuracy)) * 100),
+      same: !!d.same,
+      round: Math.round(num(d.round, 1e7))
+    } : null
   }
 }
 
@@ -248,6 +258,54 @@ export function drawShareCard(ctx, d, opts = {}) {
     ctx.fillStyle = '#8aa6bb'
     ctx.font = `400 28px ${sans}`
     ctx.fillText('敲满一炷香，就会得到一张别人能复算的禅印。', bx, by)
+  }
+
+  // 战报：一场对战就是一次转发的理由。同一炷才写「同一题」，否则如实标出
+  if (d.duel) {
+    const dy = y + boxH + 26
+    const dh = 132
+    roundRect(ctx, pad, dy, W - pad * 2, dh, 10)
+    ctx.fillStyle = 'rgba(255, 204, 102, 0.07)'
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(255, 204, 102, 0.5)'
+    ctx.lineWidth = 2
+    ctx.stroke()
+
+    const dx = pad + 34
+    ctx.textAlign = 'left'
+    ctx.fillStyle = gold
+    ctx.font = `600 21px ${mono}`
+    ctx.fillText(
+      d.duel.same ? `战帖 · 第 ${d.duel.round} 炷 · 同一张节拍表` : `战帖 · 第 ${d.duel.round} 炷（非同一炷，仅供参考）`,
+      dx, dy + 36
+    )
+
+    // 左边是我，右边是挑战者：先小字标身份，再大字给数字，读起来不用猜谁是谁
+    ctx.fillStyle = '#8aa6bb'
+    ctx.font = `400 22px ${mono}`
+    ctx.fillText('我', dx, dy + 70)
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `700 52px ${mono}`
+    ctx.fillText(`${d.duel.mine}%`, dx, dy + 118)
+
+    const vx = dx + 250
+    ctx.fillStyle = 'rgba(255, 204, 102, 0.8)'
+    ctx.font = `600 24px ${mono}`
+    ctx.fillText('VS', vx, dy + 116)
+
+    const ox = vx + 74
+    ctx.fillStyle = '#8aa6bb'
+    ctx.font = `400 22px ${mono}`
+    ctx.fillText(fitText(ctx, d.duel.name || '对手', 210), ox, dy + 70)
+    ctx.fillStyle = '#eafcff'
+    ctx.font = `700 52px ${mono}`
+    ctx.fillText(`${d.duel.theirs}%`, ox, dy + 118)
+
+    ctx.textAlign = 'right'
+    ctx.fillStyle = gold
+    ctx.font = `700 38px ${sans}`
+    ctx.fillText(d.duel.label, W - pad - 34, dy + 112)
+    ctx.textAlign = 'left'
   }
 
   // 页脚
